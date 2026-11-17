@@ -232,6 +232,7 @@ function bootApplication() {
   initPWA();
   loadFromLocalStorage();
   checkAuthSession();
+  loadSchoolIdentity(); // Sinkronkan identitas sekolah & logo ke seluruh elemen tampilan awal
   populateLoginTeacherDropdown();
   calculateClashes();
 
@@ -1898,10 +1899,11 @@ function loadSchoolIdentity() {
   const cfg = {};
   if (Array.isArray(sekolah)) {
     sekolah.forEach(row => {
-      if (row.kunci) cfg[row.kunci] = row.nilai;
-      else if (row.key) cfg[row.key] = row.value;
+      if (row.kunci !== undefined) cfg[row.kunci] = row.nilai;
+      else if (row.key !== undefined) cfg[row.key] = row.value;
+      else if (row.Kunci !== undefined) cfg[row.Kunci] = row.Nilai;
     });
-  } else if (typeof sekolah === 'object') {
+  } else if (typeof sekolah === 'object' && sekolah !== null) {
     Object.assign(cfg, sekolah);
   }
 
@@ -1910,44 +1912,115 @@ function loadSchoolIdentity() {
     if (el && val !== undefined && val !== null) el.value = val;
   };
 
-  setVal('sch-nama', cfg.nama_sekolah || 'Sekolah Dasar Negeri Pilangrejo 1');
-  setVal('sch-npsn', cfg.npsn || '20507812');
-  setVal('sch-nss', cfg.nss || '101054002001');
-  setVal('sch-akreditasi', cfg.akreditasi || 'A (Amat Baik)');
-  setVal('sch-alamat', cfg.alamat || 'Jl. Raya Pilangrejo No. 12, Pilangkenceng, Kab. Madiun 63154');
-  setVal('sch-email', cfg.email || 'sdn.pilangrejo1@madiunkab.go.id');
-  setVal('sch-website', cfg.website || 'sdn-pilangrejo1.sch.id');
-  setVal('sch-kepsek', cfg.kepala_sekolah || 'Dra. Sri Mulyani, M.Pd');
-  setVal('sch-nip-kepsek', cfg.nip_kepala_sekolah || '19740512 199803 2 004');
-  setVal('sch-tahun-ajaran', cfg.tahun_ajaran || '2024/2025');
-  setVal('sch-semester', cfg.semester || 'Ganjil');
+  const setText = (id, val) => {
+    const el = document.getElementById(id);
+    if (el && val !== undefined && val !== null) el.textContent = val;
+  };
 
-  // Update Logo preview
-  const logoUrl = cfg.logo_sekolah || AppState.schoolLogoBase64;
-  updateSchoolLogoUI(logoUrl);
+  const namaSekolah = cfg.nama_sekolah || 'Sekolah Dasar Negeri Pilangrejo 1';
+  const npsn = cfg.npsn || '20507812';
+  const nss = cfg.nss || '101054002001';
+  const akreditasi = cfg.akreditasi || 'A (Amat Baik)';
+  const alamat = cfg.alamat || 'Jl. Raya Pilangrejo No. 12, Pilangkenceng, Kab. Madiun 63154';
+  const email = cfg.email || 'sdn.pilangrejo1@madiunkab.go.id';
+  const website = cfg.website || 'sdn-pilangrejo1.sch.id';
+  const kepsek = cfg.kepala_sekolah || 'Dra. Sri Mulyani, M.Pd';
+  const nipKepsek = cfg.nip_kepala_sekolah || '19740512 199803 2 004';
+  const tahunAjaran = cfg.tahun_ajaran || '2024/2025';
+  const semester = cfg.semester || 'Ganjil';
+  const logoSekolah = cfg.logo_sekolah || AppState.schoolLogoBase64 || '';
 
-  // Update Header / Kop elements
-  const headerSchEl = document.getElementById('header-school-name');
-  if (headerSchEl) headerSchEl.textContent = cfg.nama_sekolah || 'SDN Pilangrejo 1';
+  // 1. Form Inputs di Tab Identitas Sekolah
+  setVal('sch-nama', namaSekolah);
+  setVal('sch-npsn', npsn);
+  setVal('sch-nss', nss);
+  setVal('sch-akreditasi', akreditasi);
+  setVal('sch-alamat', alamat);
+  setVal('sch-email', email);
+  setVal('sch-website', website);
+  setVal('sch-kepsek', kepsek);
+  setVal('sch-nip-kepsek', nipKepsek);
+  setVal('sch-tahun-ajaran', tahunAjaran);
+  setVal('sch-semester', semester);
+
+  // 2. Tampilan Global UI: Subtitle Sidebar, Header, Login, Dashboard Badge
+  setText('sidebar-school-subtitle', namaSekolah);
+  setText('login-school-name-subtitle', `${namaSekolah} • Kab. Madiun`);
+  setText('header-school-name', namaSekolah);
+  setText('header-ta-text', `TP ${tahunAjaran}`);
+  setText('dash-ta-badge', `Tahun Ajaran ${tahunAjaran}`);
+
+  // 3. Kop Surat & Pengesahan Dokumen Cetak / Pratinjau SK
+  setText('print-school-name', namaSekolah.toUpperCase());
+  setText('print-school-alamat', `Alamat: ${alamat}`);
+  setText('print-school-meta', `Email: ${email} | NPSN: ${npsn} | Akreditasi: ${akreditasi}`);
+  setText('print-ta-sub', `SEMESTER ${String(semester).toUpperCase()} - TAHUN PELAJARAN ${tahunAjaran}`);
+  setText('print-kepsek-ttd', kepsek.replace(/(Dr\.|Dra\.|Drs\.|H\.|Hj\.|,.*)/gi, '').trim() || kepsek);
+  setText('print-kepsek-nama', kepsek);
+  setText('print-kepsek-nip', `NIP. ${nipKepsek}`);
+
+  // 4. Sinkronkan Logo di seluruh elemen tampilan
+  updateSchoolLogoUI(logoSekolah);
 }
 
 function updateSchoolLogoUI(logoSrc) {
+  if (logoSrc) AppState.schoolLogoBase64 = logoSrc;
+  const src = logoSrc || AppState.schoolLogoBase64;
+
+  // Pratinjau Form Pengaturan
   const imgEl = document.getElementById('school-logo-preview');
   const placeholderEl = document.getElementById('school-logo-placeholder');
-  const printLogoEl = document.getElementById('print-logo-container');
-
-  if (logoSrc) {
-    if (imgEl) {
-      imgEl.src = logoSrc;
+  if (imgEl && placeholderEl) {
+    if (src) {
+      imgEl.src = src;
       imgEl.style.display = 'block';
+      placeholderEl.style.display = 'none';
+    } else {
+      imgEl.style.display = 'none';
+      placeholderEl.style.display = 'flex';
     }
-    if (placeholderEl) placeholderEl.style.display = 'none';
-    if (printLogoEl) {
-      printLogoEl.innerHTML = `<img src="${logoSrc}" alt="Logo Sekolah" class="w-full h-full object-contain">`;
+  }
+
+  // Logo Sidebar
+  const sideImg = document.getElementById('sidebar-logo-img');
+  const sideFallback = document.getElementById('sidebar-logo-fallback');
+  if (sideImg && sideFallback) {
+    if (src) {
+      sideImg.src = src;
+      sideImg.style.display = 'block';
+      sideFallback.style.display = 'none';
+    } else {
+      sideImg.style.display = 'none';
+      sideFallback.style.display = 'inline-block';
     }
-  } else {
-    if (imgEl) imgEl.style.display = 'none';
-    if (placeholderEl) placeholderEl.style.display = 'flex';
+  }
+
+  // Logo Halaman Login
+  const loginImg = document.getElementById('login-school-logo-img');
+  const loginFallback = document.getElementById('login-school-logo-fallback');
+  if (loginImg && loginFallback) {
+    if (src) {
+      loginImg.src = src;
+      loginImg.style.display = 'block';
+      loginFallback.style.display = 'none';
+    } else {
+      loginImg.style.display = 'none';
+      loginFallback.style.display = 'inline-block';
+    }
+  }
+
+  // Logo Kop Surat Dokumen Cetak
+  const printImg = document.getElementById('print-school-logo-img');
+  const printFallback = document.getElementById('print-logo-fallback');
+  if (printImg && printFallback) {
+    if (src) {
+      printImg.src = src;
+      printImg.style.display = 'block';
+      printFallback.style.display = 'none';
+    } else {
+      printImg.style.display = 'none';
+      printFallback.style.display = 'inline-block';
+    }
   }
 }
 
@@ -1964,7 +2037,7 @@ function handleSchoolLogoUpload(e) {
   reader.onload = function(evt) {
     AppState.schoolLogoBase64 = evt.target.result;
     updateSchoolLogoUI(AppState.schoolLogoBase64);
-    showToast('Pratinjau logo berhasil diperbarui. Klik Simpan & Sinkronkan.', 'info');
+    showToast('Pratinjau logo berhasil dimuat. Klik Simpan & Sinkronkan.', 'info');
   };
   reader.readAsDataURL(file);
 }
@@ -1987,20 +2060,33 @@ async function saveSchoolIdentityForm() {
     logo_sekolah: AppState.schoolLogoBase64 || ''
   };
 
-  // Optimistic update
+  // Optimistic UI update seketika di seluruh halaman
   AppState.master.sekolah = Object.keys(config).map(k => ({ kunci: k, nilai: config[k] }));
   saveToLocalStorage();
   loadSchoolIdentity();
 
-  showToast('Menyimpan identitas sekolah & menyinkronkan logo ke database...', 'info');
+  showToast('Menyimpan identitas sekolah & menyinkronkan ke database...', 'info');
   const btn = document.getElementById('btn-save-school');
   if (btn) btn.classList.add('opacity-75');
 
-  const res = await apiPost('saveSchoolIdentity', { config, logoBase64: AppState.schoolLogoBase64 });
+  const res = await apiPost('saveSchoolIdentity', {
+    config: config,
+    logoBase64: AppState.schoolLogoBase64 || '',
+    ...config
+  });
   if (btn) btn.classList.remove('opacity-75');
 
   if (res && res.success) {
-    showToast('Identitas sekolah berhasil diperbarui dan disinkronkan ke Sheets!', 'success');
+    if (res.logo_url) {
+      AppState.schoolLogoBase64 = res.logo_url;
+      config.logo_sekolah = res.logo_url;
+    }
+    if (res.sekolah && Array.isArray(res.sekolah)) {
+      AppState.master.sekolah = res.sekolah;
+    }
+    saveToLocalStorage();
+    loadSchoolIdentity();
+    showToast('Identitas sekolah berhasil disimpan & disinkronkan ke Google Sheets!', 'success');
   } else {
     showToast('Identitas sekolah disimpan di penyimpanan lokal browser', 'info');
   }
@@ -2177,41 +2263,197 @@ async function deleteUser(username) {
 }
 
 // ============================================================================
-// REVISI 4: PENGATURAN WAKTU & JP (HARIAN & PER KELAS)
+// REVISI 2: PENGATURAN WAKTU, DURASI JP, & ISTIRAHAT DINAMIS
 // ============================================================================
+function parseTimeToMinutes(timeStr) {
+  if (!timeStr) return 7 * 60;
+  const parts = String(timeStr).split(':').map(Number);
+  return (parts[0] || 0) * 60 + (parts[1] || 0);
+}
+
+function formatMinutesToTime(totalMins) {
+  const h = Math.floor(totalMins / 60) % 24;
+  const m = totalMins % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+function generateDayTimeSlots(dayConfig, dayName) {
+  const jamMulai = dayConfig.jam_mulai || '07:00';
+  const menitPerJp = parseInt(dayConfig.menit_per_jp) || 45;
+  const jumlahJp = parseInt(dayConfig.jumlah_jp) || 8;
+  const ist1Menit = parseInt(dayConfig.istirahat_1_menit) || 0;
+  const ist1Setelah = parseInt(dayConfig.istirahat_1_setelah_jp) || 0;
+  const ist2Menit = parseInt(dayConfig.istirahat_2_menit) || 0;
+  const ist2Setelah = parseInt(dayConfig.istirahat_2_setelah_jp) || 0;
+
+  let currentMin = parseTimeToMinutes(jamMulai);
+  const slots = [];
+
+  for (let jp = 1; jp <= jumlahJp; jp++) {
+    const startStr = formatMinutesToTime(currentMin);
+    const endStr = formatMinutesToTime(currentMin + menitPerJp);
+    currentMin += menitPerJp;
+
+    slots.push({
+      hari: dayName,
+      jp: jp,
+      jam_mulai: startStr,
+      jam_selesai: endStr,
+      is_break: false,
+      nama_slot: `KBM JP ${jp}`
+    });
+
+    // Istirahat 1
+    if (ist1Menit > 0 && ist1Setelah === jp) {
+      const bStart = formatMinutesToTime(currentMin);
+      const bEnd = formatMinutesToTime(currentMin + ist1Menit);
+      currentMin += ist1Menit;
+      slots.push({
+        hari: dayName,
+        jp: 91,
+        jam_mulai: bStart,
+        jam_selesai: bEnd,
+        is_break: true,
+        nama_slot: 'Istirahat 1'
+      });
+    }
+
+    // Istirahat 2 (Sholat Dzuhur)
+    if (ist2Menit > 0 && ist2Setelah === jp) {
+      const bStart = formatMinutesToTime(currentMin);
+      const bEnd = formatMinutesToTime(currentMin + ist2Menit);
+      currentMin += ist2Menit;
+      slots.push({
+        hari: dayName,
+        jp: 92,
+        jam_mulai: bStart,
+        jam_selesai: bEnd,
+        is_break: true,
+        nama_slot: 'Istirahat 2 (Dzuhur)'
+      });
+    }
+  }
+
+  return {
+    slots: slots,
+    jamSelesai: formatMinutesToTime(currentMin)
+  };
+}
+
+function getDayConfigOrDefault(d) {
+  const daily = (AppState.timeConfig && AppState.timeConfig.dailyConfig) || {};
+  if (daily[d]) return daily[d];
+
+  // Default cerdas sesuai kebutuhan sekolah
+  const isJumat = d === 'Jumat';
+  const isSabtu = d === 'Sabtu';
+
+  return {
+    jam_mulai: '07:00',
+    menit_per_jp: isJumat || isSabtu ? 40 : 45,
+    jumlah_jp: isJumat ? 6 : (isSabtu ? 6 : 8),
+    istirahat_1_menit: 15,
+    istirahat_1_setelah_jp: isJumat ? 4 : 3,
+    istirahat_2_menit: isJumat ? 0 : 30,
+    istirahat_2_setelah_jp: isJumat ? 0 : 6
+  };
+}
+
 function renderTimeConfigView() {
   const daysContainer = document.getElementById('time-days-config-container');
   const classLimitsTbody = document.getElementById('class-time-limits-tbody');
 
   const days = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-  const masterWaktu = AppState.master.waktu || [];
 
   if (daysContainer) {
     daysContainer.innerHTML = days.map(d => {
-      const daySlots = masterWaktu.filter(w => w.hari === d && !w.is_break);
-      const jpCount = daySlots.length || (d === 'Jumat' ? 5 : d === 'Sabtu' ? 6 : 7);
-      const firstSlot = daySlots[0] || { jam_mulai: '07:00' };
-      const lastSlot = daySlots[daySlots.length - 1] || { jam_selesai: '12:00' };
+      const cfg = getDayConfigOrDefault(d);
+      const calc = generateDayTimeSlots(cfg, d);
+
+      const menitOptions = [30, 35, 40, 45, 50].map(m => `
+        <option value="${m}" ${parseInt(cfg.menit_per_jp) === m ? 'selected' : ''}>${m} Menit</option>
+      `).join('');
 
       return `
-        <div class="p-3.5 bg-slate-50 border border-border-subtle rounded-xl flex items-center justify-between gap-3 flex-wrap">
-          <div class="w-24">
-            <span class="font-extrabold text-sm text-text-primary">${d}</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <div>
-              <span class="text-[10px] text-text-secondary block">Jam Mulai</span>
-              <input type="time" id="time-start-${d}" value="${firstSlot.jam_mulai || '07:00'}" class="text-xs border rounded-lg p-1.5 bg-white font-bold">
+        <div class="p-4 bg-slate-50 border border-border-subtle rounded-2xl space-y-3 transition-all hover:border-primary/40 hover:shadow-sm">
+          <div class="flex items-center justify-between border-b border-border-subtle pb-2">
+            <div class="flex items-center gap-2">
+              <span class="w-3 h-3 rounded-full ${d === 'Jumat' ? 'bg-emerald-500' : 'bg-primary'}"></span>
+              <span class="font-black text-sm text-text-primary tracking-wide">${d}</span>
             </div>
-            <span>-</span>
+            <span id="time-day-badge-${d}" class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 text-blue-900 border border-blue-200">
+              ${cfg.jam_mulai} – ${calc.jamSelesai} (${cfg.jumlah_jp} JP @ ${cfg.menit_per_jp}m)
+            </span>
+          </div>
+
+          <!-- Baris Utama: Jam Mulai, Menit/JP, Jumlah JP, Jam Selesai -->
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
             <div>
-              <span class="text-[10px] text-text-secondary block">Jam Selesai</span>
-              <input type="time" id="time-end-${d}" value="${lastSlot.jam_selesai || '12:00'}" class="text-xs border rounded-lg p-1.5 bg-white font-bold">
+              <label class="text-[10px] font-bold text-slate-600 block mb-1">Jam Mulai KBM:</label>
+              <input type="time" id="time-start-${d}" value="${cfg.jam_mulai}" onchange="recalcDaySchedule('${d}')" class="w-full text-xs border rounded-lg p-2 bg-white font-bold text-slate-900 border-slate-300">
+            </div>
+
+            <div>
+              <label class="text-[10px] font-bold text-slate-600 block mb-1">Menit per JP:</label>
+              <select id="time-menit-${d}" onchange="recalcDaySchedule('${d}')" class="w-full text-xs border rounded-lg p-2 bg-white font-bold text-slate-900 border-slate-300 cursor-pointer">
+                ${menitOptions}
+              </select>
+            </div>
+
+            <div>
+              <label class="text-[10px] font-bold text-slate-600 block mb-1">Jumlah JP:</label>
+              <input type="number" id="time-jp-${d}" value="${cfg.jumlah_jp}" min="1" max="10" oninput="recalcDaySchedule('${d}')" class="w-full text-xs border rounded-lg p-2 bg-white font-bold text-center text-slate-900 border-slate-300">
+            </div>
+
+            <div>
+              <label class="text-[10px] font-bold text-slate-600 block mb-1">Jam Selesai (Auto):</label>
+              <input type="time" id="time-end-${d}" value="${calc.jamSelesai}" readonly class="w-full text-xs border rounded-lg p-2 bg-slate-100 font-black text-center text-primary border-slate-300 cursor-not-allowed">
             </div>
           </div>
-          <div>
-            <span class="text-[10px] text-text-secondary block">Jumlah JP</span>
-            <input type="number" id="time-jp-${d}" value="${jpCount}" min="1" max="10" class="w-16 text-xs border rounded-lg p-1.5 bg-white font-bold text-center">
+
+          <!-- Baris Istirahat: Istirahat I & Istirahat II -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200/60 text-xs">
+            <!-- Istirahat 1 -->
+            <div class="bg-white p-2.5 rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+              <span class="font-bold text-slate-700 text-[11px] whitespace-nowrap">Istirahat I:</span>
+              <div class="flex items-center gap-1.5">
+                <input type="number" id="time-ist1-dur-${d}" value="${cfg.istirahat_1_menit}" min="0" max="60" oninput="recalcDaySchedule('${d}')" class="w-14 border rounded p-1 text-center font-bold bg-slate-50 border-slate-300">
+                <span class="text-[10px] text-slate-500 font-semibold">m, stlh</span>
+                <select id="time-ist1-after-${d}" onchange="recalcDaySchedule('${d}')" class="border rounded p-1 text-xs font-bold bg-slate-50 border-slate-300 cursor-pointer">
+                  <option value="0" ${cfg.istirahat_1_setelah_jp == 0 ? 'selected' : ''}>-</option>
+                  <option value="1" ${cfg.istirahat_1_setelah_jp == 1 ? 'selected' : ''}>JP 1</option>
+                  <option value="2" ${cfg.istirahat_1_setelah_jp == 2 ? 'selected' : ''}>JP 2</option>
+                  <option value="3" ${cfg.istirahat_1_setelah_jp == 3 ? 'selected' : ''}>JP 3</option>
+                  <option value="4" ${cfg.istirahat_1_setelah_jp == 4 ? 'selected' : ''}>JP 4</option>
+                  <option value="5" ${cfg.istirahat_1_setelah_jp == 5 ? 'selected' : ''}>JP 5</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Istirahat 2 -->
+            <div class="bg-white p-2.5 rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+              <span class="font-bold text-slate-700 text-[11px] whitespace-nowrap">Istirahat II:</span>
+              <div class="flex items-center gap-1.5">
+                <input type="number" id="time-ist2-dur-${d}" value="${cfg.istirahat_2_menit}" min="0" max="60" oninput="recalcDaySchedule('${d}')" class="w-14 border rounded p-1 text-center font-bold bg-slate-50 border-slate-300">
+                <span class="text-[10px] text-slate-500 font-semibold">m, stlh</span>
+                <select id="time-ist2-after-${d}" onchange="recalcDaySchedule('${d}')" class="border rounded p-1 text-xs font-bold bg-slate-50 border-slate-300 cursor-pointer">
+                  <option value="0" ${cfg.istirahat_2_setelah_jp == 0 ? 'selected' : ''}>-</option>
+                  <option value="4" ${cfg.istirahat_2_setelah_jp == 4 ? 'selected' : ''}>JP 4</option>
+                  <option value="5" ${cfg.istirahat_2_setelah_jp == 5 ? 'selected' : ''}>JP 5</option>
+                  <option value="6" ${cfg.istirahat_2_setelah_jp == 6 ? 'selected' : ''}>JP 6</option>
+                  <option value="7" ${cfg.istirahat_2_setelah_jp == 7 ? 'selected' : ''}>JP 7</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pratinjau Rangkaian Slot Waktu Harian -->
+          <div id="time-preview-timeline-${d}" class="text-[10px] text-slate-600 bg-white/80 p-2 rounded-lg border border-slate-200 flex flex-wrap gap-1 items-center">
+            ${calc.slots.map(s => `
+              <span class="px-1.5 py-0.5 rounded ${s.is_break ? 'bg-amber-100 text-amber-900 font-bold' : 'bg-slate-100 text-slate-700 font-medium'}">
+                ${s.is_break ? s.nama_slot : `JP ${s.jp}`}: ${s.jam_mulai}–${s.jam_selesai}
+              </span>
+            `).join('')}
           </div>
         </div>
       `;
@@ -2234,10 +2476,10 @@ function renderTimeConfigView() {
           <td class="p-2.5 font-bold text-primary">${k.kode_kelas}</td>
           <td class="p-2.5 font-semibold text-text-secondary">Kelas ${k.tingkat}</td>
           <td class="p-2.5">
-            <input type="number" id="limit-max-${k.id}" value="${maxJp}" min="4" max="9" class="w-16 border rounded p-1 text-center font-bold bg-slate-50">
+            <input type="number" id="limit-max-${k.id}" value="${maxJp}" min="4" max="9" class="w-16 border rounded p-1 text-center font-bold bg-slate-50 border-slate-300">
           </td>
           <td class="p-2.5">
-            <input type="number" id="limit-target-${k.id}" value="${targetJp}" min="20" max="45" class="w-16 border rounded p-1 text-center font-bold bg-slate-50">
+            <input type="number" id="limit-target-${k.id}" value="${targetJp}" min="20" max="45" class="w-16 border rounded p-1 text-center font-bold bg-slate-50 border-slate-300">
           </td>
         </tr>
       `;
@@ -2245,15 +2487,57 @@ function renderTimeConfigView() {
   }
 }
 
+function recalcDaySchedule(d) {
+  const currentCfg = {
+    jam_mulai: document.getElementById(`time-start-${d}`)?.value || '07:00',
+    menit_per_jp: parseInt(document.getElementById(`time-menit-${d}`)?.value) || 45,
+    jumlah_jp: parseInt(document.getElementById(`time-jp-${d}`)?.value) || 8,
+    istirahat_1_menit: parseInt(document.getElementById(`time-ist1-dur-${d}`)?.value) || 0,
+    istirahat_1_setelah_jp: parseInt(document.getElementById(`time-ist1-after-${d}`)?.value) || 0,
+    istirahat_2_menit: parseInt(document.getElementById(`time-ist2-dur-${d}`)?.value) || 0,
+    istirahat_2_setelah_jp: parseInt(document.getElementById(`time-ist2-after-${d}`)?.value) || 0
+  };
+
+  const calc = generateDayTimeSlots(currentCfg, d);
+
+  const endInput = document.getElementById(`time-end-${d}`);
+  if (endInput) endInput.value = calc.jamSelesai;
+
+  const badge = document.getElementById(`time-day-badge-${d}`);
+  if (badge) {
+    badge.textContent = `${currentCfg.jam_mulai} – ${calc.jamSelesai} (${currentCfg.jumlah_jp} JP @ ${currentCfg.menit_per_jp}m)`;
+  }
+
+  const timeline = document.getElementById(`time-preview-timeline-${d}`);
+  if (timeline) {
+    timeline.innerHTML = calc.slots.map(s => `
+      <span class="px-1.5 py-0.5 rounded ${s.is_break ? 'bg-amber-100 text-amber-900 font-bold' : 'bg-slate-100 text-slate-700 font-medium'}">
+        ${s.is_break ? s.nama_slot : `JP ${s.jp}`}: ${s.jam_mulai}–${s.jam_selesai}
+      </span>
+    `).join('');
+  }
+}
+
 async function saveTimeConfiguration() {
   const days = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
   const dailyConfig = {};
+  const allGeneratedSlots = [];
+
   days.forEach(d => {
-    dailyConfig[d] = {
+    const cfg = {
       jam_mulai: document.getElementById(`time-start-${d}`)?.value || '07:00',
-      jam_selesai: document.getElementById(`time-end-${d}`)?.value || '12:00',
-      jumlah_jp: parseInt(document.getElementById(`time-jp-${d}`)?.value) || 7
+      menit_per_jp: parseInt(document.getElementById(`time-menit-${d}`)?.value) || 45,
+      jumlah_jp: parseInt(document.getElementById(`time-jp-${d}`)?.value) || 8,
+      istirahat_1_menit: parseInt(document.getElementById(`time-ist1-dur-${d}`)?.value) || 0,
+      istirahat_1_setelah_jp: parseInt(document.getElementById(`time-ist1-after-${d}`)?.value) || 0,
+      istirahat_2_menit: parseInt(document.getElementById(`time-ist2-dur-${d}`)?.value) || 0,
+      istirahat_2_setelah_jp: parseInt(document.getElementById(`time-ist2-after-${d}`)?.value) || 0
     };
+
+    const calc = generateDayTimeSlots(cfg, d);
+    cfg.jam_selesai = calc.jamSelesai;
+    dailyConfig[d] = cfg;
+    allGeneratedSlots.push(...calc.slots);
   });
 
   const classLimits = (AppState.master.kelas || []).map(k => ({
@@ -2263,13 +2547,18 @@ async function saveTimeConfiguration() {
     total_jp_minggu: parseInt(document.getElementById(`limit-target-${k.id}`)?.value) || 36
   }));
 
+  // Update AppState secara instan
   AppState.timeConfig = { dailyConfig, classLimits };
+  AppState.master.waktu = allGeneratedSlots;
   saveToLocalStorage();
   showToast('Pengaturan waktu dan batas JP disimpan ke memori', 'info');
 
-  const res = await apiPost('saveTimeConfig', { dailyConfig, classLimits });
+  // Perbarui tampilan pratinjau dokumen cetak jika sedang aktif
+  renderPrintableDocument();
+
+  const res = await apiPost('saveTimeConfig', { dailyConfig, classLimits, slots: allGeneratedSlots, waktu: allGeneratedSlots });
   if (res && res.success) {
-    showToast('Konfigurasi waktu berhasil disinkronkan ke Sheets!', 'success');
+    showToast('Konfigurasi waktu KBM berhasil disinkronkan ke Google Sheets!', 'success');
   }
 }
 
@@ -2649,6 +2938,33 @@ function renderPrintableDocument() {
     return;
   }
 
+  // Helper waktu dinamis yang terintegrasi dengan Menu Waktu dan Jam Belajar
+  const getSlotTime = (dayName, jpNum) => {
+    const slot = (AppState.master.waktu || []).find(w => w.hari === dayName && parseInt(w.jp) === jpNum && !w.is_break);
+    if (slot && slot.jam_mulai && slot.jam_selesai) {
+      return `${slot.jam_mulai.replace(':', '.')} – ${slot.jam_selesai.replace(':', '.')}`;
+    }
+    const cfg = getDayConfigOrDefault(dayName);
+    const calc = generateDayTimeSlots(cfg, dayName);
+    const genSlot = calc.slots.find(s => parseInt(s.jp) === jpNum && !s.is_break);
+    if (genSlot) return `${genSlot.jam_mulai.replace(':', '.')} – ${genSlot.jam_selesai.replace(':', '.')}`;
+    return '';
+  };
+
+  const getBreakTime = (dayName, breakIdx) => {
+    const breaks = (AppState.master.waktu || []).filter(w => w.hari === dayName && w.is_break);
+    const b = breaks[breakIdx - 1];
+    if (b && b.jam_mulai && b.jam_selesai) {
+      return `${b.jam_mulai.replace(':', '.')} – ${b.jam_selesai.replace(':', '.')}`;
+    }
+    const cfg = getDayConfigOrDefault(dayName);
+    const calc = generateDayTimeSlots(cfg, dayName);
+    const genBreaks = calc.slots.filter(s => s.is_break);
+    const gb = genBreaks[breakIdx - 1];
+    if (gb) return `${gb.jam_mulai.replace(':', '.')} – ${gb.jam_selesai.replace(':', '.')}`;
+    return '';
+  };
+
   // Helper untuk mendapatkan teks isi slot ({KODE_GURU}) {MAPEL}
   const getSlot = (kId, day, jp) => {
     const item = jadwal.find(it => it.hari === day && parseInt(it.jp) === jp && it.kelas_id === kId);
@@ -2688,12 +3004,12 @@ function renderPrintableDocument() {
             <!-- Row 1: JAM I -->
             <tr>
               <td class="text-center font-bold">I</td>
-              <td class="text-center font-medium">07.00 – 07.45</td>
+              <td class="text-center font-medium">${getSlotTime('Senin', 1) || '07.00 – 07.45'}</td>
               <td class="text-center">${getSlot(k.id, 'Senin', 1)}</td>
               <td class="text-center">${getSlot(k.id, 'Selasa', 1)}</td>
               <td class="text-center">${getSlot(k.id, 'Rabu', 1)}</td>
               <td class="text-center">${getSlot(k.id, 'Kamis', 1)}</td>
-              <td class="text-center font-medium">07.00 – 07.40</td>
+              <td class="text-center font-medium">${getSlotTime('Jumat', 1) || '07.00 – 07.40'}</td>
               <td class="text-center">${getSlot(k.id, 'Jumat', 1)}</td>
               <td class="text-center">${getSlot(k.id, 'Sabtu', 1) || 'Istighosah'}</td>
             </tr>
@@ -2701,12 +3017,12 @@ function renderPrintableDocument() {
             <!-- Row 2: JAM II -->
             <tr>
               <td class="text-center font-bold">II</td>
-              <td class="text-center font-medium">07.45 – 08.30</td>
+              <td class="text-center font-medium">${getSlotTime('Senin', 2) || '07.45 – 08.30'}</td>
               <td class="text-center">${getSlot(k.id, 'Senin', 2)}</td>
               <td class="text-center">${getSlot(k.id, 'Selasa', 2)}</td>
               <td class="text-center">${getSlot(k.id, 'Rabu', 2)}</td>
               <td class="text-center">${getSlot(k.id, 'Kamis', 2)}</td>
-              <td class="text-center font-medium">07.40 – 08.20</td>
+              <td class="text-center font-medium">${getSlotTime('Jumat', 2) || '07.40 – 08.20'}</td>
               <td class="text-center">${getSlot(k.id, 'Jumat', 2)}</td>
               <td class="text-center">${getSlot(k.id, 'Sabtu', 2)}</td>
             </tr>
@@ -2714,12 +3030,12 @@ function renderPrintableDocument() {
             <!-- Row 3: JAM III -->
             <tr>
               <td class="text-center font-bold">III</td>
-              <td class="text-center font-medium">08.30 – 09.15</td>
+              <td class="text-center font-medium">${getSlotTime('Senin', 3) || '08.30 – 09.15'}</td>
               <td class="text-center">${getSlot(k.id, 'Senin', 3)}</td>
               <td class="text-center">${getSlot(k.id, 'Selasa', 3)}</td>
               <td class="text-center">${getSlot(k.id, 'Rabu', 3)}</td>
               <td class="text-center">${getSlot(k.id, 'Kamis', 3)}</td>
-              <td class="text-center font-medium">08.20 – 09.00</td>
+              <td class="text-center font-medium">${getSlotTime('Jumat', 3) || '08.20 – 09.00'}</td>
               <td class="text-center">${getSlot(k.id, 'Jumat', 3)}</td>
               <td class="text-center">${getSlot(k.id, 'Sabtu', 3)}</td>
             </tr>
@@ -2727,9 +3043,9 @@ function renderPrintableDocument() {
             <!-- Row 4: Istirahat Senin-Kamis & Sabtu | JP 4 Jum'at -->
             <tr>
               <td class="text-center font-bold"></td>
-              <td class="text-center font-medium">09.15 – 09.30</td>
+              <td class="text-center font-medium">${getBreakTime('Senin', 1) || '09.15 – 09.30'}</td>
               <td colspan="4" class="cell-break">I s t i r a h a t</td>
-              <td class="text-center font-medium">09.00 – 09.40</td>
+              <td class="text-center font-medium">${getSlotTime('Jumat', 4) || '09.00 – 09.40'}</td>
               <td class="text-center">${getSlot(k.id, 'Jumat', 4)}</td>
               <td class="cell-break">Istirahat</td>
             </tr>
@@ -2737,12 +3053,12 @@ function renderPrintableDocument() {
             <!-- Row 5: JAM IV Senin-Kamis & Sabtu | Istirahat Jum'at -->
             <tr>
               <td class="text-center font-bold">IV</td>
-              <td class="text-center font-medium">09.30 – 10.15</td>
+              <td class="text-center font-medium">${getSlotTime('Senin', 4) || '09.30 – 10.15'}</td>
               <td class="text-center">${getSlot(k.id, 'Senin', 4)}</td>
               <td class="text-center">${getSlot(k.id, 'Selasa', 4)}</td>
               <td class="text-center">${getSlot(k.id, 'Rabu', 4)}</td>
               <td class="text-center">${getSlot(k.id, 'Kamis', 4)}</td>
-              <td class="text-center font-medium">09.40 – 09.55</td>
+              <td class="text-center font-medium">${getBreakTime('Jumat', 1) || '09.40 – 09.55'}</td>
               <td class="cell-break">Istirahat</td>
               <td class="text-center">${getSlot(k.id, 'Sabtu', 4)}</td>
             </tr>
@@ -2750,12 +3066,12 @@ function renderPrintableDocument() {
             <!-- Row 6: JAM V -->
             <tr>
               <td class="text-center font-bold">V</td>
-              <td class="text-center font-medium">10.15 – 11.00</td>
+              <td class="text-center font-medium">${getSlotTime('Senin', 5) || '10.15 – 11.00'}</td>
               <td class="text-center">${getSlot(k.id, 'Senin', 5)}</td>
               <td class="text-center">${getSlot(k.id, 'Selasa', 5)}</td>
               <td class="text-center">${getSlot(k.id, 'Rabu', 5)}</td>
               <td class="text-center">${getSlot(k.id, 'Kamis', 5)}</td>
-              <td class="text-center font-medium">09.55 – 10.35</td>
+              <td class="text-center font-medium">${getSlotTime('Jumat', 5) || '09.55 – 10.35'}</td>
               <td class="text-center">${getSlot(k.id, 'Jumat', 5)}</td>
               <td class="text-center">${getSlot(k.id, 'Sabtu', 5)}</td>
             </tr>
@@ -2763,12 +3079,12 @@ function renderPrintableDocument() {
             <!-- Row 7: JAM VI -->
             <tr>
               <td class="text-center font-bold">VI</td>
-              <td class="text-center font-medium">11.00 – 11.45</td>
+              <td class="text-center font-medium">${getSlotTime('Senin', 6) || '11.00 – 11.45'}</td>
               <td class="text-center">${getSlot(k.id, 'Senin', 6)}</td>
               <td class="text-center">${getSlot(k.id, 'Selasa', 6)}</td>
               <td class="text-center">${getSlot(k.id, 'Rabu', 6)}</td>
               <td class="text-center">${getSlot(k.id, 'Kamis', 6)}</td>
-              <td class="text-center font-medium">10.35 – 11.15</td>
+              <td class="text-center font-medium">${getSlotTime('Jumat', 6) || '10.35 – 11.15'}</td>
               <td class="text-center">${getSlot(k.id, 'Jumat', 6)}</td>
               <td class="text-center">${getSlot(k.id, 'Sabtu', 6)}</td>
             </tr>
@@ -2776,7 +3092,7 @@ function renderPrintableDocument() {
             <!-- Row 8: Jama'ah Sholat Dzuhur -->
             <tr>
               <td class="text-center font-bold"></td>
-              <td class="text-center font-medium">11.45 – 12.15</td>
+              <td class="text-center font-medium">${getBreakTime('Senin', 2) || '11.45 – 12.15'}</td>
               <td colspan="4" class="cell-dzuhur">Jama'ah Sholat Dzuhur</td>
               <td class="text-center font-medium"></td>
               <td class="text-center"></td>
@@ -2786,7 +3102,7 @@ function renderPrintableDocument() {
             <!-- Row 9: JAM VII -->
             <tr>
               <td class="text-center font-bold">VII</td>
-              <td class="text-center font-medium">12.15 – 13.00</td>
+              <td class="text-center font-medium">${getSlotTime('Senin', 7) || '12.15 – 13.00'}</td>
               <td class="text-center">${getSlot(k.id, 'Senin', 7)}</td>
               <td class="text-center">${getSlot(k.id, 'Selasa', 7)}</td>
               <td class="text-center">${getSlot(k.id, 'Rabu', 7)}</td>
@@ -2799,7 +3115,7 @@ function renderPrintableDocument() {
             <!-- Row 10: JAM VIII -->
             <tr>
               <td class="text-center font-bold">VIII</td>
-              <td class="text-center font-medium">13.00 – 13.45</td>
+              <td class="text-center font-medium">${getSlotTime('Senin', 8) || '13.00 – 13.45'}</td>
               <td class="text-center">${getSlot(k.id, 'Senin', 8)}</td>
               <td class="text-center">${getSlot(k.id, 'Selasa', 8)}</td>
               <td class="text-center">${getSlot(k.id, 'Rabu', 8)}</td>
@@ -3108,6 +3424,14 @@ function seedDefaultUsersAndBeban() {
   ];
 
   AppState.timeConfig = {
+    dailyConfig: {
+      Senin: { jam_mulai: '07:00', menit_per_jp: 45, jumlah_jp: 8, istirahat_1_menit: 15, istirahat_1_setelah_jp: 3, istirahat_2_menit: 30, istirahat_2_setelah_jp: 6 },
+      Selasa: { jam_mulai: '07:00', menit_per_jp: 45, jumlah_jp: 8, istirahat_1_menit: 15, istirahat_1_setelah_jp: 3, istirahat_2_menit: 30, istirahat_2_setelah_jp: 6 },
+      Rabu: { jam_mulai: '07:00', menit_per_jp: 45, jumlah_jp: 8, istirahat_1_menit: 15, istirahat_1_setelah_jp: 3, istirahat_2_menit: 30, istirahat_2_setelah_jp: 6 },
+      Kamis: { jam_mulai: '07:00', menit_per_jp: 45, jumlah_jp: 8, istirahat_1_menit: 15, istirahat_1_setelah_jp: 3, istirahat_2_menit: 30, istirahat_2_setelah_jp: 6 },
+      Jumat: { jam_mulai: '07:00', menit_per_jp: 40, jumlah_jp: 6, istirahat_1_menit: 15, istirahat_1_setelah_jp: 4, istirahat_2_menit: 0, istirahat_2_setelah_jp: 0 },
+      Sabtu: { jam_mulai: '07:00', menit_per_jp: 40, jumlah_jp: 6, istirahat_1_menit: 15, istirahat_1_setelah_jp: 3, istirahat_2_menit: 30, istirahat_2_setelah_jp: 6 }
+    },
     days: {},
     classLimits: (AppState.master.kelas || []).map(k => ({
       kelas_id: k.id,
@@ -3435,6 +3759,7 @@ function registerGlobalHandlers() {
 
   // Revisi 4: Pengaturan Waktu & JP
   window.renderTimeConfigView = renderTimeConfigView;
+  window.recalcDaySchedule = recalcDaySchedule;
   window.saveTimeConfiguration = saveTimeConfiguration;
 
   // Revisi 5: Beban Mengajar & Auto-Generator

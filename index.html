@@ -710,16 +710,16 @@
             </button>
           </div>
 
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <!-- Left: JP per Hari Setting -->
-            <div class="bg-surface-card rounded-2xl p-6 elevation-card border border-border-subtle space-y-4">
+          <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            <!-- Left: JP per Hari Setting (Dinamis: Jam Mulai, Menit/JP, Istirahat I & II, Jam Selesai) -->
+            <div class="xl:col-span-2 bg-surface-card rounded-2xl p-6 elevation-card border border-border-subtle space-y-4">
               <h3 class="font-bold text-sm text-text-primary flex items-center gap-2">
                 <span class="material-symbols-outlined text-primary text-[20px]">calendar_view_day</span>
-                <span>Jumlah JP & Durasi per Hari</span>
+                <span>Struktur Waktu, Durasi Menit per JP, & Istirahat Harian</span>
               </h3>
-              <p class="text-xs text-text-secondary">Tentukan jam mulai, jam selesai, dan jumlah slot JP untuk tiap hari:</p>
+              <p class="text-xs text-text-secondary">Atur jam mulai, pilihan menit per JP (30, 35, 40, 45, 50m), jumlah JP, serta durasi & posisi Istirahat 1 & 2 untuk tiap hari (Senin s.d. Sabtu):</p>
               
-              <div class="space-y-3" id="time-days-config-container">
+              <div class="space-y-4" id="time-days-config-container">
                 <!-- Dynamically populated for Monday through Saturday -->
               </div>
             </div>
