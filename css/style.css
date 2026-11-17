@@ -129,6 +129,62 @@ th.sticky-time-col {
 }
 
 /* Cetak SK KBM Resmi (@media print) A4 Landscape */
+.table-schedule-preview {
+  border-collapse: collapse !important;
+  width: 100% !important;
+  border: 1.5px solid #000000 !important;
+}
+
+.table-schedule-preview th,
+.table-schedule-preview td {
+  border: 1px solid #000000 !important;
+  padding: 4px 6px !important;
+  font-size: 10.5px !important;
+  vertical-align: middle !important;
+}
+
+.table-schedule-preview th {
+  background-color: #f8fafc !important;
+  font-weight: 800 !important;
+  text-align: center !important;
+}
+
+.table-schedule-preview .cell-break {
+  background-color: #94a3b8 !important;
+  color: #000000 !important;
+  font-weight: 800 !important;
+  text-align: center !important;
+  letter-spacing: 2px !important;
+}
+
+.table-schedule-preview .cell-dzuhur {
+  background-color: #64748b !important;
+  color: #ffffff !important;
+  font-weight: 800 !important;
+  text-align: center !important;
+  letter-spacing: 1px !important;
+}
+
+@media print {
+  .table-schedule-preview .cell-break {
+    background-color: #a8a29e !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  .table-schedule-preview .cell-dzuhur {
+    background-color: #78716c !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  .class-schedule-block {
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+  .class-schedule-block:last-child {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+}
 @media print {
   body {
     background: #FFFFFF !important;

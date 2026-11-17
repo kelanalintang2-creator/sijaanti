@@ -2608,7 +2608,18 @@ function applyGeneratedScheduleToMatrix() {
 // 13. PRINT PREVIEW & DOCUMENT EXPORT
 // ============================================================================
 function renderExportView() {
+  populateExportClassDropdown();
   renderPrintableDocument();
+}
+
+function populateExportClassDropdown() {
+  const sel = document.getElementById('export-class-select');
+  if (!sel) return;
+  const classes = AppState.master.kelas || [];
+  const currVal = sel.value || 'ALL';
+  
+  sel.innerHTML = `<option value="ALL">Semua Kelas</option>` +
+    classes.map(k => `<option value="${k.id}" ${k.id === currVal ? 'selected' : ''}>${k.nama_rombel || k.kode_kelas}</option>`).join('');
 }
 
 function renderPrintableDocument() {
@@ -2616,7 +2627,6 @@ function renderPrintableDocument() {
   if (!container) return;
 
   const masterKelas = AppState.master.kelas || [];
-  const masterWaktu = AppState.master.waktu || [];
   const masterMapel = AppState.master.mapel || [];
   const masterGuru = AppState.master.guru || [];
   const jadwal = AppState.jadwal || [];
@@ -2624,66 +2634,226 @@ function renderPrintableDocument() {
   const mapelMap = {}; masterMapel.forEach(m => { mapelMap[m.id] = m; });
   const guruMap = {}; masterGuru.forEach(g => { guruMap[g.id] = g; });
 
-  const days = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-
-  let html = `
-    <table class="w-full border-collapse border border-slate-900 text-[10px] text-center">
-      <thead class="bg-slate-100 font-bold border-b-2 border-slate-900">
-        <tr>
-          <th class="border border-slate-900 p-1.5 w-14">Hari</th>
-          <th class="border border-slate-900 p-1.5 w-10">JP</th>
-          <th class="border border-slate-900 p-1.5 w-20">Waktu</th>
-  `;
-
-  masterKelas.forEach(k => { html += `<th class="border border-slate-900 p-1.5">${k.kode_kelas}</th>`; });
-  html += `</tr></thead><tbody>`;
-
-  days.forEach(d => {
-    const dayWaktu = masterWaktu.filter(w => w.hari === d);
-    dayWaktu.forEach((w, idx) => {
-      html += `<tr>`;
-      if (idx === 0) {
-        html += `<td rowspan="${dayWaktu.length}" class="border border-slate-900 font-extrabold bg-slate-50 p-1.5">${d}</td>`;
-      }
-      html += `<td class="border border-slate-900 font-bold p-1">${w.jp}</td>`;
-      html += `<td class="border border-slate-900 p-1">${w.jam_mulai}-${w.jam_selesai}</td>`;
-
-      if (w.is_break) {
-        html += `<td colspan="${masterKelas.length}" class="border border-slate-900 bg-slate-100 font-bold tracking-wider text-slate-600">${w.nama_slot}</td>`;
-      } else {
-        masterKelas.forEach(k => {
-          const item = jadwal.find(it => it.hari === d && parseInt(it.jp) === parseInt(w.jp) && it.kelas_id === k.id);
-          if (item) {
-            const m = mapelMap[item.mapel_id] || { kode: item.mapel_id };
-            const g = guruMap[item.guru_id] || { nama: item.guru_id };
-            html += `
-              <td class="border border-slate-900 p-1 text-left align-top">
-                <div class="font-bold text-[9px] text-slate-900">${m.kode}</div>
-                <div class="text-[8px] text-slate-600 truncate">${g.nama ? g.nama.split(' ')[0] : ''}</div>
-              </td>
-            `;
-          } else {
-            html += `<td class="border border-slate-900 p-1 text-slate-400">-</td>`;
-          }
-        });
-      }
-      html += `</tr>`;
-    });
+  // Buat mapping kode huruf guru: (A), (B), (C), dst. sesuai standar jadwal kedinasan
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+  const teacherCodeMap = {};
+  masterGuru.forEach((g, idx) => {
+    teacherCodeMap[g.id] = g.kode || letters[idx % letters.length] || `G${idx + 1}`;
   });
 
-  html += `</tbody></table>`;
+  const filterClass = document.getElementById('export-class-select')?.value || 'ALL';
+  const targetClasses = (filterClass === 'ALL') ? masterKelas : masterKelas.filter(k => k.id === filterClass);
+
+  if (targetClasses.length === 0) {
+    container.innerHTML = `<div class="p-6 text-center text-slate-500 font-semibold">Tidak ada data kelas yang dapat ditampilkan.</div>`;
+    return;
+  }
+
+  // Helper untuk mendapatkan teks isi slot ({KODE_GURU}) {MAPEL}
+  const getSlot = (kId, day, jp) => {
+    const item = jadwal.find(it => it.hari === day && parseInt(it.jp) === jp && it.kelas_id === kId);
+    if (!item) return '';
+    const tCode = teacherCodeMap[item.guru_id] || '';
+    const m = mapelMap[item.mapel_id];
+    const mName = m ? (m.nama || m.kode) : item.mapel_id;
+    return tCode ? `(${tCode}) ${mName}` : mName;
+  };
+
+  let html = '';
+
+  targetClasses.forEach((k, kIdx) => {
+    const className = k.nama_rombel || k.kode_kelas;
+    html += `
+      <div class="class-schedule-block mb-8 page-break-inside-avoid">
+        <div class="text-sm font-black text-slate-900 tracking-wide uppercase mb-1.5 flex items-center justify-between">
+          <span>KELAS ${className}</span>
+          <span class="text-xs text-slate-500 font-bold no-print">Rombel ${k.kode_kelas}</span>
+        </div>
+
+        <table class="table-schedule-preview">
+          <thead>
+            <tr>
+              <th style="width: 45px;">JAM</th>
+              <th style="width: 105px;">WAKTU<br>PELAJARAN</th>
+              <th style="width: 110px;">SENIN</th>
+              <th style="width: 110px;">SELASA</th>
+              <th style="width: 110px;">RABU</th>
+              <th style="width: 110px;">KAMIS</th>
+              <th style="width: 105px;">WAKTU<br>PELAJARAN</th>
+              <th style="width: 110px;">JUM'AT</th>
+              <th style="width: 110px;">SABTU</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- Row 1: JAM I -->
+            <tr>
+              <td class="text-center font-bold">I</td>
+              <td class="text-center font-medium">07.00 – 07.45</td>
+              <td class="text-center">${getSlot(k.id, 'Senin', 1)}</td>
+              <td class="text-center">${getSlot(k.id, 'Selasa', 1)}</td>
+              <td class="text-center">${getSlot(k.id, 'Rabu', 1)}</td>
+              <td class="text-center">${getSlot(k.id, 'Kamis', 1)}</td>
+              <td class="text-center font-medium">07.00 – 07.40</td>
+              <td class="text-center">${getSlot(k.id, 'Jumat', 1)}</td>
+              <td class="text-center">${getSlot(k.id, 'Sabtu', 1) || 'Istighosah'}</td>
+            </tr>
+
+            <!-- Row 2: JAM II -->
+            <tr>
+              <td class="text-center font-bold">II</td>
+              <td class="text-center font-medium">07.45 – 08.30</td>
+              <td class="text-center">${getSlot(k.id, 'Senin', 2)}</td>
+              <td class="text-center">${getSlot(k.id, 'Selasa', 2)}</td>
+              <td class="text-center">${getSlot(k.id, 'Rabu', 2)}</td>
+              <td class="text-center">${getSlot(k.id, 'Kamis', 2)}</td>
+              <td class="text-center font-medium">07.40 – 08.20</td>
+              <td class="text-center">${getSlot(k.id, 'Jumat', 2)}</td>
+              <td class="text-center">${getSlot(k.id, 'Sabtu', 2)}</td>
+            </tr>
+
+            <!-- Row 3: JAM III -->
+            <tr>
+              <td class="text-center font-bold">III</td>
+              <td class="text-center font-medium">08.30 – 09.15</td>
+              <td class="text-center">${getSlot(k.id, 'Senin', 3)}</td>
+              <td class="text-center">${getSlot(k.id, 'Selasa', 3)}</td>
+              <td class="text-center">${getSlot(k.id, 'Rabu', 3)}</td>
+              <td class="text-center">${getSlot(k.id, 'Kamis', 3)}</td>
+              <td class="text-center font-medium">08.20 – 09.00</td>
+              <td class="text-center">${getSlot(k.id, 'Jumat', 3)}</td>
+              <td class="text-center">${getSlot(k.id, 'Sabtu', 3)}</td>
+            </tr>
+
+            <!-- Row 4: Istirahat Senin-Kamis & Sabtu | JP 4 Jum'at -->
+            <tr>
+              <td class="text-center font-bold"></td>
+              <td class="text-center font-medium">09.15 – 09.30</td>
+              <td colspan="4" class="cell-break">I s t i r a h a t</td>
+              <td class="text-center font-medium">09.00 – 09.40</td>
+              <td class="text-center">${getSlot(k.id, 'Jumat', 4)}</td>
+              <td class="cell-break">Istirahat</td>
+            </tr>
+
+            <!-- Row 5: JAM IV Senin-Kamis & Sabtu | Istirahat Jum'at -->
+            <tr>
+              <td class="text-center font-bold">IV</td>
+              <td class="text-center font-medium">09.30 – 10.15</td>
+              <td class="text-center">${getSlot(k.id, 'Senin', 4)}</td>
+              <td class="text-center">${getSlot(k.id, 'Selasa', 4)}</td>
+              <td class="text-center">${getSlot(k.id, 'Rabu', 4)}</td>
+              <td class="text-center">${getSlot(k.id, 'Kamis', 4)}</td>
+              <td class="text-center font-medium">09.40 – 09.55</td>
+              <td class="cell-break">Istirahat</td>
+              <td class="text-center">${getSlot(k.id, 'Sabtu', 4)}</td>
+            </tr>
+
+            <!-- Row 6: JAM V -->
+            <tr>
+              <td class="text-center font-bold">V</td>
+              <td class="text-center font-medium">10.15 – 11.00</td>
+              <td class="text-center">${getSlot(k.id, 'Senin', 5)}</td>
+              <td class="text-center">${getSlot(k.id, 'Selasa', 5)}</td>
+              <td class="text-center">${getSlot(k.id, 'Rabu', 5)}</td>
+              <td class="text-center">${getSlot(k.id, 'Kamis', 5)}</td>
+              <td class="text-center font-medium">09.55 – 10.35</td>
+              <td class="text-center">${getSlot(k.id, 'Jumat', 5)}</td>
+              <td class="text-center">${getSlot(k.id, 'Sabtu', 5)}</td>
+            </tr>
+
+            <!-- Row 7: JAM VI -->
+            <tr>
+              <td class="text-center font-bold">VI</td>
+              <td class="text-center font-medium">11.00 – 11.45</td>
+              <td class="text-center">${getSlot(k.id, 'Senin', 6)}</td>
+              <td class="text-center">${getSlot(k.id, 'Selasa', 6)}</td>
+              <td class="text-center">${getSlot(k.id, 'Rabu', 6)}</td>
+              <td class="text-center">${getSlot(k.id, 'Kamis', 6)}</td>
+              <td class="text-center font-medium">10.35 – 11.15</td>
+              <td class="text-center">${getSlot(k.id, 'Jumat', 6)}</td>
+              <td class="text-center">${getSlot(k.id, 'Sabtu', 6)}</td>
+            </tr>
+
+            <!-- Row 8: Jama'ah Sholat Dzuhur -->
+            <tr>
+              <td class="text-center font-bold"></td>
+              <td class="text-center font-medium">11.45 – 12.15</td>
+              <td colspan="4" class="cell-dzuhur">Jama'ah Sholat Dzuhur</td>
+              <td class="text-center font-medium"></td>
+              <td class="text-center"></td>
+              <td class="cell-dzuhur">Sholat Dzuhur</td>
+            </tr>
+
+            <!-- Row 9: JAM VII -->
+            <tr>
+              <td class="text-center font-bold">VII</td>
+              <td class="text-center font-medium">12.15 – 13.00</td>
+              <td class="text-center">${getSlot(k.id, 'Senin', 7)}</td>
+              <td class="text-center">${getSlot(k.id, 'Selasa', 7)}</td>
+              <td class="text-center">${getSlot(k.id, 'Rabu', 7)}</td>
+              <td class="text-center">${getSlot(k.id, 'Kamis', 7)}</td>
+              <td class="text-center font-medium"></td>
+              <td class="text-center"></td>
+              <td class="text-center"></td>
+            </tr>
+
+            <!-- Row 10: JAM VIII -->
+            <tr>
+              <td class="text-center font-bold">VIII</td>
+              <td class="text-center font-medium">13.00 – 13.45</td>
+              <td class="text-center">${getSlot(k.id, 'Senin', 8)}</td>
+              <td class="text-center">${getSlot(k.id, 'Selasa', 8)}</td>
+              <td class="text-center">${getSlot(k.id, 'Rabu', 8)}</td>
+              <td class="text-center">${getSlot(k.id, 'Kamis', 8)}</td>
+              <td class="text-center font-medium"></td>
+              <td class="text-center"></td>
+              <td class="text-center"></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    `;
+  });
+
+  // Tambahkan Keterangan Kode Guru Pengampu di bawah tabel
+  html += `
+    <div class="mt-6 pt-4 border-t-2 border-slate-900 text-[11px] text-slate-800 page-break-inside-avoid">
+      <div class="font-black text-xs uppercase mb-2">Keterangan Kode Guru Pengampu:</div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-4 gap-y-1">
+        ${masterGuru.map(g => `
+          <div>
+            <span class="font-extrabold text-blue-900">(${teacherCodeMap[g.id]})</span>
+            <span class="font-medium">${g.nama}${g.gelar ? ', ' + g.gelar : ''}</span>
+            <span class="text-slate-500 text-[10px]">(${g.mapel_utama || '-'})</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+
   container.innerHTML = html;
 }
 
 function exportToExcel() {
   try {
-    const table = document.querySelector('#printable-table-container table');
-    if (!table) return showToast('Tabel dokumen belum siap', 'error');
     if (typeof XLSX === 'undefined') return showToast('Library SheetJS sedang dimuat...', 'warning');
+    const container = document.getElementById('printable-table-container');
+    const tables = container ? container.querySelectorAll('table') : [];
+    if (!tables || tables.length === 0) return showToast('Tabel pratinjau belum siap', 'error');
 
-    const wb = XLSX.utils.table_to_book(table, { sheet: "Jadwal Resmi SDN Pilangrejo 1" });
-    XLSX.writeFile(wb, "Jadwal_Pelajaran_SDN_Pilangrejo_1_TP2024_2025.xlsx");
-    showToast('File Excel (.xlsx) berhasil diunduh', 'success');
+    const wb = XLSX.utils.book_new();
+
+    tables.forEach((tbl, idx) => {
+      const parentBlock = tbl.closest('.class-schedule-block');
+      const titleEl = parentBlock ? parentBlock.querySelector('.text-sm') : null;
+      let sheetName = titleEl ? titleEl.textContent.trim().replace(/[\\/?*[\]:]/g, '') : `Kelas_${idx + 1}`;
+      sheetName = sheetName.replace(/^KELAS\s*/i, 'Kelas ').substring(0, 31);
+      
+      const ws = XLSX.utils.table_to_sheet(tbl);
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    });
+
+    XLSX.writeFile(wb, "Jadwal_Pelajaran_Resmi_Format_Sekolah.xlsx");
+    showToast('File Excel (.xlsx) berhasil diunduh sesuai format jadwal!', 'success');
   } catch (err) {
     showToast('Gagal ekspor Excel: ' + err.message, 'error');
   }
@@ -2695,8 +2865,8 @@ function exportToWord() {
     if (!docContent) return showToast('Dokumen belum siap', 'error');
 
     const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>"+
-      "<head><meta charset='utf-8'><title>Jadwal Resmi SDN Pilangrejo 1</title>"+
-      "<style>body{font-family: Arial, sans-serif;} table{border-collapse:collapse;width:100%;} td,th{border:1px solid #000;padding:4px;font-size:9pt;}</style>"+
+      "<head><meta charset='utf-8'><title>Jadwal Pelajaran Resmi</title>"+
+      "<style>body{font-family: Arial, sans-serif;} table{border-collapse:collapse;width:100%;margin-bottom:20px;} td,th{border:1px solid #000;padding:5px;font-size:9pt;text-align:center;} .cell-break{background-color:#c0c0c0;font-weight:bold;letter-spacing:2px;} .cell-dzuhur{background-color:#808080;color:#fff;font-weight:bold;} </style>"+
       "</head><body>";
     const footer = "</body></html>";
     const sourceHTML = header + docContent + footer;
@@ -2705,7 +2875,7 @@ function exportToWord() {
     const fileDownload = document.createElement("a");
     document.body.appendChild(fileDownload);
     fileDownload.href = source;
-    fileDownload.download = 'Jadwal_Resmi_SDN_Pilangrejo_1.doc';
+    fileDownload.download = 'Jadwal_Pelajaran_Resmi.doc';
     fileDownload.click();
     document.body.removeChild(fileDownload);
     showToast('Dokumen Word (.doc) berhasil diunduh', 'success');
