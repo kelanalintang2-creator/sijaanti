@@ -1,0 +1,20 @@
+{
+  "name": "SiJaAnti PRO - Sistem Jadwal Anti Bentrok",
+  "short_name": "SiJaAnti",
+  "description": "Sistem Jadwal Pelajaran Anti Bentrok & SK KBM SD Negeri Pilangrejo 1",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0F172A",
+  "theme_color": "#2563EB",
+  "categories": ["education", "productivity"],
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

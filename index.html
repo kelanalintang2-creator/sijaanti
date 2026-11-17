@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>SiJaAnti PRO - Sistem Jadwal Anti Bentrok | SDN Pilangrejo 1</title>
+
+  <!-- PWA Web Manifest & Mobile Settings (/gas-pwa-github) -->
+  <link rel="manifest" href="./manifest.json">
+  <meta name="theme-color" content="#2563EB">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="SiJaAnti">
+  <link rel="apple-touch-icon" href="./icon.svg">
+  <link rel="icon" type="image/svg+xml" href="./icon.svg">
+
+  <!-- Typography & Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            "primary": "#2563EB",
+            "primary-hover": "#1D4ED8",
+            "surface-bg": "#F8FAFC",
+            "surface-card": "#FFFFFF",
+            "text-primary": "#0F172A",
+            "text-secondary": "#475569",
+            "text-muted": "#94A3B8",
+            "border-subtle": "#E2E8F0",
+            "border-strong": "#CBD5E1"
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif']
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- Chart.js for JTM Distribution & Workload Charts -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- SheetJS for Instant Client-Side Excel (.XLSX) Export -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+  <!-- Custom Stylesheet -->
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body class="bg-surface-bg font-sans text-text-primary antialiased min-h-screen">
+
+  <!-- =========================================================================
+       0. VIEW: FULLSCREEN LOGIN & AUTHENTICATION SCREEN
+       ========================================================================= -->
+  <div id="view-login" style="display: flex;" class="min-h-screen w-full bg-gradient-to-br from-slate-900 via-indigo-950 to-blue-900 items-center justify-center p-4 py-8">
+    <div class="max-w-md w-full bg-white rounded-3xl shadow-2xl border border-white/20 p-6 sm:p-8 relative overflow-hidden">
+      
+      <!-- Top Decorative Accent -->
+      <div class="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-600"></div>
+
+      <!-- School Logo & App Title -->
+      <div class="flex flex-col items-center text-center mb-6">
+        <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-blue-500/30 mb-3 border border-white/30">
+          <span class="material-symbols-outlined text-[36px]">calendar_clock</span>
+        </div>
+        <h1 class="text-2xl font-black text-slate-900 tracking-tight">SiJaAnti PRO</h1>
+        <p class="text-xs font-bold text-indigo-600 uppercase tracking-wider mt-0.5">Sistem Jadwal Anti Bentrok</p>
+        <p class="text-[11px] text-slate-500 mt-1">SD Negeri Pilangrejo 1 • Kab. Madiun</p>
+      </div>
+
+      <!-- Role Selection Tabs -->
+      <div class="bg-slate-100 p-1 rounded-2xl flex items-center mb-5 text-xs font-bold">
+        <button type="button" onclick="selectLoginRole('admin')" id="login-tab-admin" class="flex-1 py-2 rounded-xl bg-white text-primary shadow-sm transition-all text-center cursor-pointer">
+          Kurikulum
+        </button>
+        <button type="button" onclick="selectLoginRole('kepsek')" id="login-tab-kepsek" class="flex-1 py-2 rounded-xl text-slate-600 hover:text-slate-900 transition-all text-center cursor-pointer">
+          Kepala Sekolah
+        </button>
+        <button type="button" onclick="selectLoginRole('guru')" id="login-tab-guru" class="flex-1 py-2 rounded-xl text-slate-600 hover:text-slate-900 transition-all text-center cursor-pointer">
+          Guru
+        </button>
+      </div>
+
+      <!-- Login Form (Murni DIV untuk mencegah reload) -->
+      <div id="login-form" class="space-y-4">
+        
+        <!-- Field for Guru (Teacher Selector) -->
+        <div id="login-teacher-wrap" class="hidden">
+          <label class="block text-xs font-bold text-slate-700 mb-1">Pilih Identitas Guru:</label>
+          <select id="login-teacher-select" onchange="updateLoginTeacherCredentials(this.value)" class="w-full text-xs bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary cursor-pointer">
+            <!-- Dynamically populated -->
+          </select>
+        </div>
+
+        <!-- Username / NIP Field -->
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1" id="login-username-label">NIP / Username:</label>
+          <div class="relative">
+            <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]">account_circle</span>
+            <input type="text" id="login-username" onkeydown="if(event.key==='Enter') handleLoginSubmit(event)" value="19791104 200501 1 003" class="w-full h-10 pl-9 pr-3 rounded-xl border border-slate-300 bg-slate-50 text-xs font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"/>
+          </div>
+        </div>
+
+        <!-- Password Field -->
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Kata Sandi / PIN:</label>
+          <div class="relative">
+            <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]">lock</span>
+            <input type="password" id="login-password" onkeydown="if(event.key==='Enter') handleLoginSubmit(event)" value="******" class="w-full h-10 pl-9 pr-3 rounded-xl border border-slate-300 bg-slate-50 text-xs font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"/>
+          </div>
+        </div>
+
+        <!-- Submit Button -->
+        <button type="button" onclick="handleLoginSubmit(event)" id="btn-login-submit" class="w-full h-11 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2 transition-all mt-2 cursor-pointer">
+          <span class="material-symbols-outlined text-[18px]">login</span>
+          <span id="btn-login-text">Masuk ke Sistem SiJaAnti</span>
+        </button>
+
+      </div>
+
+      <!-- Instant 1-Click Access for Evaluation -->
+      <div class="mt-5 pt-4 border-t border-slate-200">
+        <p class="text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center mb-2.5">Akses Cepat Pengujian (1-Klik):</p>
+        <div class="grid grid-cols-3 gap-2">
+          <button type="button" onclick="quickLogin('admin')" class="p-2 rounded-xl border border-blue-200 bg-blue-50/70 hover:bg-blue-100 text-blue-800 text-[10px] font-bold text-center transition-all flex flex-col items-center gap-1 cursor-pointer">
+            <span class="material-symbols-outlined text-[16px] text-blue-600">tune</span>
+            <span>Kurikulum</span>
+          </button>
+          <button type="button" onclick="quickLogin('kepsek')" class="p-2 rounded-xl border border-emerald-200 bg-emerald-50/70 hover:bg-emerald-100 text-emerald-800 text-[10px] font-bold text-center transition-all flex flex-col items-center gap-1 cursor-pointer">
+            <span class="material-symbols-outlined text-[16px] text-emerald-600">verified</span>
+            <span>Kepsek</span>
+          </button>
+          <button type="button" onclick="quickLogin('guru')" class="p-2 rounded-xl border border-purple-200 bg-purple-50/70 hover:bg-purple-100 text-purple-800 text-[10px] font-bold text-center transition-all flex flex-col items-center gap-1 cursor-pointer">
+            <span class="material-symbols-outlined text-[16px] text-purple-600">person</span>
+            <span>Guru 4A</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Feature Badges Footer -->
+      <div class="mt-5 flex items-center justify-center gap-3 text-[10px] text-slate-500 font-semibold border-t border-slate-100 pt-3">
+        <span class="flex items-center gap-1">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+          <span>PWA Mobile Ready</span>
+        </span>
+        <span>•</span>
+        <span>Anti-Bentrok 0ms</span>
+        <span>•</span>
+        <span>REST API Cloud</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       APPLICATION MAIN LAYOUT (Visible only when logged in)
+       ========================================================================= -->
+  <div id="app-layout" style="display: none;">
+    
+    <!-- Mobile Sidebar Backdrop Overlay -->
+    <div id="mobile-backdrop" onclick="toggleMobileSidebar()" style="display: none;" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-40 transition-opacity"></div>
+
+    <!-- Responsive Sidebar -->
+    <aside id="sidebar" class="fixed left-0 top-0 h-screen w-64 bg-gradient-to-b from-blue-600 to-indigo-700 z-50 flex flex-col justify-between text-white shadow-xl transition-transform duration-300 -translate-x-full lg:translate-x-0 select-none">
+      <div class="flex flex-col flex-1 overflow-y-auto">
+        
+        <!-- App Logo & Branding Header in Sidebar -->
+        <div class="p-5 flex items-center gap-3 border-b border-white/10">
+          <div class="w-10 h-10 rounded-xl bg-white text-primary flex items-center justify-center shadow-md font-black text-xl flex-shrink-0">
+            <span class="material-symbols-outlined text-[24px]">calendar_month</span>
+          </div>
+          <div class="flex flex-col">
+            <span class="font-extrabold text-base tracking-tight leading-tight">SiJaAnti PRO</span>
+            <span class="text-[11px] text-blue-100 font-medium leading-tight">SDN Pilangrejo 1</span>
+          </div>
+        </div>
+
+        <!-- Navigation Menu -->
+        <nav class="p-3 space-y-1.5 flex-1">
+          <div class="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-blue-200/80">Menu Navigasi</div>
+
+          <button type="button" onclick="navigateView('dashboard')" id="nav-btn-dashboard" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold bg-white/20 text-white shadow-inner transition-all text-left cursor-pointer">
+            <span class="material-symbols-outlined text-[20px]">grid_view</span>
+            <span>Executive Dashboard</span>
+          </button>
+
+          <button type="button" onclick="navigateView('matrix')" id="nav-btn-matrix" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-white/90 hover:bg-white/10 hover:text-white transition-all text-left cursor-pointer">
+            <span class="material-symbols-outlined text-[20px]">calendar_month</span>
+            <span class="flex-1">Papan Plotting (Matrix)</span>
+            <span id="sidebar-clash-badge" class="hidden px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500 text-white animate-pulse">0</span>
+          </button>
+
+          <button type="button" onclick="navigateView('availability')" id="nav-btn-availability" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-white/90 hover:bg-white/10 hover:text-white transition-all text-left cursor-pointer">
+            <span class="material-symbols-outlined text-[20px]">how_to_reg</span>
+            <span>Ketersediaan Guru</span>
+          </button>
+
+          <button type="button" onclick="navigateView('master')" id="nav-btn-master" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-white/90 hover:bg-white/10 hover:text-white transition-all text-left cursor-pointer">
+            <span class="material-symbols-outlined text-[20px]">database</span>
+            <span>Master Data & JTM</span>
+          </button>
+
+          <button type="button" onclick="navigateView('export')" id="nav-btn-export" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-white/90 hover:bg-white/10 hover:text-white transition-all text-left cursor-pointer">
+            <span class="material-symbols-outlined text-[20px]">print</span>
+            <span>Pratinjau & Ekspor SK</span>
+          </button>
+
+          <!-- PWA Install Button in Sidebar (Mobile Friendly) -->
+          <button type="button" id="btn-install-pwa-sidebar" onclick="triggerPWAInstall()" style="display: none;" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold bg-amber-400 text-slate-900 shadow-md transition-all text-left cursor-pointer hover:bg-amber-300">
+            <span class="material-symbols-outlined text-[20px]">install_mobile</span>
+            <span>Pasang App di HP</span>
+          </button>
+        </nav>
+
+        <!-- System Engine Status Card -->
+        <div class="px-4 py-2 mt-auto">
+          <div class="bg-white/10 backdrop-blur-md rounded-xl p-3 border border-white/10 text-xs">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="text-blue-100 font-medium">Anti-Bentrok Engine</span>
+              <span class="flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span class="text-[11px] font-bold text-emerald-300">Aktif</span>
+              </span>
+            </div>
+            <p class="text-[11px] text-white/80 leading-snug">REST API & Zero-Latency SPA</p>
+            <div class="mt-2 pt-2 border-t border-white/10 flex items-center justify-between text-[11px]">
+              <span class="text-blue-200">Semester Ganjil</span>
+              <span class="font-bold text-white">2024/2025</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- User Profile & Role Switcher in Sidebar Footer -->
+      <div class="p-3 border-t border-white/10 bg-black/10 space-y-2">
+        <div class="flex items-center justify-between gap-2 p-1.5 rounded-lg hover:bg-white/5 transition-colors">
+          <div class="flex items-center gap-2.5 overflow-hidden">
+            <div class="w-8 h-8 rounded-full bg-amber-400 text-slate-900 font-bold flex items-center justify-center text-xs flex-shrink-0" id="user-avatar-badge">
+              SM
+            </div>
+            <div class="flex flex-col truncate">
+              <span class="text-xs font-semibold text-white truncate" id="current-user-name">Dra. Sri Mulyani, M.Pd</span>
+              <span class="text-[10px] text-blue-200 truncate" id="current-user-role">Kepala Sekolah</span>
+            </div>
+          </div>
+          <select onchange="switchRole(this.value)" id="role-select" class="bg-white/20 text-white text-[11px] rounded px-1.5 py-1 border border-white/20 focus:outline-none focus:ring-1 focus:ring-white cursor-pointer">
+            <option value="admin" class="text-slate-900">Kurikulum (Admin)</option>
+            <option value="kepsek" class="text-slate-900" selected>Kepala Sekolah</option>
+            <option value="guru" class="text-slate-900">Guru Kelas/Mapel</option>
+          </select>
+        </div>
+
+        <!-- Logout Button -->
+        <button type="button" onclick="logoutUser()" class="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition-colors cursor-pointer">
+          <span class="material-symbols-outlined text-[18px]">logout</span>
+          <span>Keluar Sesi</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content Wrapper with offset for Sidebar -->
+    <div class="lg:pl-64 flex flex-col min-h-screen">
+      
+      <!-- Top Fixed Header -->
+      <header id="top-header" class="sticky top-0 z-30 h-16 bg-surface-card border-b border-border-subtle px-4 lg:px-8 flex items-center justify-between shadow-[0_1px_8px_rgba(30,41,59,0.04)]">
+        
+        <!-- Left: Mobile Toggle & Global Search -->
+        <div class="flex items-center gap-3 flex-1 max-w-xl">
+          <button type="button" onclick="toggleMobileSidebar()" class="lg:hidden p-2 text-text-secondary hover:text-text-primary rounded-lg hover:bg-surface-bg cursor-pointer">
+            <span class="material-symbols-outlined text-[24px]">menu</span>
+          </button>
+
+          <div class="relative w-full max-w-sm">
+            <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-[18px]">search</span>
+            <input type="text" id="global-search" oninput="handleGlobalSearch(this.value)" placeholder="Cari guru, kelas, atau mapel..." class="w-full h-9 pl-9 pr-3 rounded-lg border border-border-subtle bg-surface-bg text-xs font-medium text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"/>
+          </div>
+
+          <div id="connection-pill" class="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold">
+            <span class="material-symbols-outlined text-[15px]">cloud_done</span>
+            <span id="connection-status-text">REST API Online</span>
+          </div>
+        </div>
+
+        <!-- Right: Clashes Alert Badge, Install PWA Header & Actions -->
+        <div class="flex items-center gap-2.5">
+          
+          <!-- PWA Install Button in Header -->
+          <button type="button" id="btn-install-pwa-header" onclick="triggerPWAInstall()" style="display: none;" class="items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold hover:bg-amber-200 transition-colors cursor-pointer">
+            <span class="material-symbols-outlined text-[16px]">install_mobile</span>
+            <span>Pasang App</span>
+          </button>
+
+          <!-- Live Clash Button Indicator in Header -->
+          <button type="button" onclick="navigateView('matrix')" id="header-clash-indicator" class="hidden items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold hover:bg-rose-100 transition-colors cursor-pointer">
+            <span class="material-symbols-outlined text-[16px] animate-bounce">error</span>
+            <span id="header-clash-count">0 Bentrok</span>
+          </button>
+
+          <div class="hidden md:flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold">
+            <span class="material-symbols-outlined text-[14px]">school</span>
+            <span>TP 2024/2025</span>
+          </div>
+
+          <!-- Sync Button -->
+          <button type="button" onclick="syncDataToServer()" title="Sinkronkan dengan Google Sheets via REST API" class="p-2 rounded-lg text-text-secondary hover:bg-surface-bg hover:text-primary transition-colors relative cursor-pointer">
+            <span class="material-symbols-outlined text-[20px]" id="sync-icon">sync</span>
+          </button>
+
+        </div>
+      </header>
+
+      <!-- PWA Install Banner (Mobile Prominent) -->
+      <div id="pwa-install-banner" style="display: none;" class="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-4 py-2.5 flex items-center justify-between text-xs font-medium shadow-md">
+        <div class="flex items-center gap-2">
+          <span class="material-symbols-outlined text-[18px]">phone_android</span>
+          <span>Pasang <strong>SiJaAnti</strong> di HP untuk akses offline & instan tanpa browser bar!</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="triggerPWAInstall()" class="px-3 py-1 bg-white text-primary rounded-lg font-bold text-[11px] shadow hover:bg-blue-50 cursor-pointer">
+            Pasang Sekarang
+          </button>
+          <button type="button" onclick="hideInstallUI()" class="text-white/80 hover:text-white p-1 cursor-pointer">
+            <span class="material-symbols-outlined text-[16px]">close</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Main Dynamic Application Container -->
+      <main id="app-view" class="flex-1 p-4 lg:p-8 max-w-7xl w-full mx-auto">
+        
+        <!-- 1. VIEW: EXECUTIVE DASHBOARD -->
+        <section id="view-dashboard" style="display: block;" class="space-y-6">
+          
+          <!-- Dashboard Top Banner -->
+          <div class="bg-surface-card rounded-2xl p-6 elevation-card flex flex-col md:flex-row md:items-center justify-between gap-4 border border-border-subtle">
+            <div>
+              <div class="flex items-center gap-2 mb-1">
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800">Tahun Ajaran 2024/2025</span>
+                <span id="dashboard-approval-pill" class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800">Menunggu Pengesahan</span>
+              </div>
+              <h1 class="text-2xl font-black text-text-primary tracking-tight">Executive Dashboard & Pemantauan KBM</h1>
+              <p class="text-sm text-text-secondary mt-1">Monitoring pemerataan beban Jam Tatap Muka (JTM), status anti-bentrok, dan kesiapan jadwal SD Negeri Pilangrejo 1.</p>
+            </div>
+            <div class="flex items-center gap-2.5 flex-wrap">
+              <button type="button" onclick="navigateView('matrix')" class="px-4 py-2 rounded-xl bg-primary text-white text-xs font-bold hover:bg-primary-hover shadow-sm flex items-center gap-2 transition-all cursor-pointer">
+                <span class="material-symbols-outlined text-[18px]">calendar_month</span>
+                <span>Buka Papan Plotting</span>
+              </button>
+              <button type="button" onclick="openApprovalModal()" id="btn-approve-kbm" class="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 shadow-sm flex items-center gap-2 transition-all cursor-pointer">
+                <span class="material-symbols-outlined text-[18px]">verified</span>
+                <span>Pengesahan Jadwal</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Real-Time Clash Alert Banner (Conditional) -->
+          <div id="dashboard-clash-banner" class="hidden bg-rose-50 border-2 border-rose-300 rounded-2xl p-5 clash-pulse flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+              <div class="w-12 h-12 rounded-xl bg-rose-600 text-white flex items-center justify-center flex-shrink-0 shadow-md">
+                <span class="material-symbols-outlined text-[28px]">crisis_alert</span>
+              </div>
+              <div>
+                <h3 class="font-bold text-rose-950 text-base flex items-center gap-2">
+                  <span>Peringatan Konflik Jadwal Terdeteksi!</span>
+                  <span id="clash-banner-count" class="px-2 py-0.5 text-xs rounded-full bg-rose-200 text-rose-900 font-extrabold">2 Konflik</span>
+                </h3>
+                <p class="text-xs text-rose-800 mt-0.5">Sistem mendeteksi guru mengajar di dua rombel bersamaan atau bentrok ruangan. Segera selesaikan sebelum pengesahan Kepala Sekolah.</p>
+              </div>
+            </div>
+            <button type="button" onclick="openClashDetailModal()" class="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 flex-shrink-0 transition-all cursor-pointer">
+              <span>Lihat Rincian Bentrok</span>
+              <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+            </button>
+          </div>
+
+          <!-- KPI Metric Cards Grid -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            
+            <div class="bg-surface-card rounded-2xl p-5 elevation-card border border-border-subtle flex items-center justify-between">
+              <div>
+                <span class="text-xs font-semibold text-text-secondary">Total Guru Pengajar</span>
+                <div class="text-3xl font-black text-text-primary mt-1" id="kpi-total-guru">24</div>
+                <span class="text-xs text-emerald-700 font-medium">100% Aktif Semester Ini</span>
+              </div>
+              <div class="w-11 h-11 rounded-xl bg-blue-50 text-primary flex items-center justify-center">
+                <span class="material-symbols-outlined text-[24px]">school</span>
+              </div>
+            </div>
+
+            <div class="bg-surface-card rounded-2xl p-5 elevation-card border border-border-subtle flex items-center justify-between">
+              <div>
+                <span class="text-xs font-semibold text-text-secondary">Rombongan Belajar</span>
+                <div class="text-3xl font-black text-text-primary mt-1" id="kpi-total-rombel">12</div>
+                <span class="text-xs text-blue-700 font-medium">Kelas 1 s.d. Kelas 6</span>
+              </div>
+              <div class="w-11 h-11 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                <span class="material-symbols-outlined text-[24px]">groups</span>
+              </div>
+            </div>
+
+            <div class="bg-surface-card rounded-2xl p-5 elevation-card border border-border-subtle flex items-center justify-between">
+              <div>
+                <span class="text-xs font-semibold text-text-secondary">Progres Plotting KBM</span>
+                <div class="text-3xl font-black text-text-primary mt-1" id="kpi-plotting-percent">82%</div>
+                <span class="text-xs text-text-secondary font-medium" id="kpi-plotting-jp">275 / 336 JP</span>
+              </div>
+              <div class="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                <span class="material-symbols-outlined text-[24px]">trending_up</span>
+              </div>
+            </div>
+
+            <div class="bg-surface-card rounded-2xl p-5 elevation-card border border-border-subtle flex items-center justify-between">
+              <div>
+                <span class="text-xs font-semibold text-text-secondary">Status Bentrok</span>
+                <div class="text-3xl font-black text-emerald-600 mt-1" id="kpi-clash-count">0</div>
+                <span class="text-xs text-emerald-700 font-semibold" id="kpi-clash-status">Jadwal Aman</span>
+              </div>
+              <div class="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center" id="kpi-clash-icon-wrap">
+                <span class="material-symbols-outlined text-[24px]">verified</span>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Charts & Progress Section -->
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Left 2 Cols: JTM Workload Distribution Chart -->
+            <div class="lg:col-span-2 bg-surface-card rounded-2xl p-6 elevation-card border border-border-subtle flex flex-col justify-between">
+              <div>
+                <div class="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 class="font-bold text-base text-text-primary">Distribusi Jam Tatap Muka (JTM) Guru</h3>
+                    <p class="text-xs text-text-secondary">Target beban sertifikasi minimal 24 JP per minggu</p>
+                  </div>
+                  <span class="px-2.5 py-1 rounded-lg bg-slate-100 text-[11px] font-bold text-slate-700">Sampel 12 Guru</span>
+                </div>
+                <div class="h-64 relative" id="chart-parent-container">
+                  <canvas id="jtmChart"></canvas>
+                </div>
+              </div>
+              <div class="mt-4 pt-3 border-t border-border-subtle flex items-center justify-between text-xs text-text-secondary">
+                <div class="flex items-center gap-4">
+                  <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Tercapai (&ge; 24 JP)</span>
+                  <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-primary"></span> Mendekati (20-23 JP)</span>
+                  <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span> Kurang (&lt; 20 JP)</span>
+                </div>
+                <button type="button" onclick="navigateView('master')" class="text-primary font-bold hover:underline cursor-pointer">Lihat Rincian &rarr;</button>
+              </div>
+            </div>
+
+            <!-- Right 1 Col: Rombel Readiness Progress Checklist -->
+            <div class="bg-surface-card rounded-2xl p-6 elevation-card border border-border-subtle flex flex-col">
+              <h3 class="font-bold text-base text-text-primary mb-1">Kesiapan Jadwal per Rombel</h3>
+              <p class="text-xs text-text-secondary mb-4">Kelengkapan 28 Jam Pelajaran per rombel</p>
+              
+              <div class="space-y-3 flex-1 overflow-y-auto max-h-64 pr-1" id="rombel-readiness-list">
+                <!-- Dynamically populated -->
+              </div>
+
+              <div class="mt-4 pt-3 border-t border-border-subtle flex items-center justify-between text-xs">
+                <span class="text-text-secondary font-medium">Target Total: 12 Rombel</span>
+                <span class="font-bold text-emerald-600">Terisi 82%</span>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Bottom: Audit Trail & Activity Log -->
+          <div class="bg-surface-card rounded-2xl p-6 elevation-card border border-border-subtle">
+            <div class="flex items-center justify-between mb-4">
+              <div>
+                <h3 class="font-bold text-base text-text-primary">Log Aktivitas & Audit Trail</h3>
+                <p class="text-xs text-text-secondary">Riwayat perubahan plotting dan persetujuan ketersediaan</p>
+              </div>
+              <button type="button" onclick="syncDataToServer()" class="text-xs font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer">
+                <span class="material-symbols-outlined text-[16px]">sync</span>
+                <span>Refresh Log</span>
+              </button>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 text-text-secondary border-b border-border-subtle font-bold">
+                  <tr>
+                    <th class="py-2.5 px-3">Waktu</th>
+                    <th class="py-2.5 px-3">Pengguna</th>
+                    <th class="py-2.5 px-3">Aksi</th>
+                    <th class="py-2.5 px-3">Keterangan</th>
+                  </tr>
+                </thead>
+                <tbody id="audit-trail-tbody" class="divide-y divide-border-subtle">
+                  <!-- Dynamically populated -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </section>
+
+        <!-- 2. VIEW: SCHEDULING MATRIX (ANTI-BENTROK) -->
+        <section id="view-matrix" style="display: none;" class="space-y-4">
+          
+          <!-- Matrix Top Control Bar -->
+          <div class="bg-surface-card rounded-2xl p-4 elevation-card border border-border-subtle flex flex-col md:flex-row md:items-center justify-between gap-4">
+            
+            <div class="flex items-center gap-3 flex-wrap">
+              <!-- Matrix View Mode Buttons -->
+              <div class="bg-slate-100 p-1 rounded-xl flex items-center text-xs font-bold">
+                <button type="button" onclick="setMatrixMode('class')" id="btn-mode-class" class="px-3 py-1.5 rounded-lg bg-white text-primary shadow-sm transition-all font-bold cursor-pointer">
+                  Mode Kelas (Per Hari)
+                </button>
+                <button type="button" onclick="setMatrixMode('single-class')" id="btn-mode-single" class="px-3 py-1.5 rounded-lg text-text-secondary hover:text-text-primary transition-all font-semibold cursor-pointer">
+                  1 Kelas Penuh
+                </button>
+                <button type="button" onclick="setMatrixMode('teacher')" id="btn-mode-teacher" class="px-3 py-1.5 rounded-lg text-text-secondary hover:text-text-primary transition-all font-semibold cursor-pointer">
+                  Mode Guru
+                </button>
+              </div>
+
+              <!-- Filter Selector Dropdown depending on Mode -->
+              <div id="class-select-wrap" style="display: none;">
+                <select id="matrix-class-select" onchange="AppState.selectedClassId = this.value; renderMatrixTable();" class="text-xs bg-slate-50 border border-border-subtle rounded-xl px-3 py-2 font-bold text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary cursor-pointer">
+                  <!-- Dynamically populated -->
+                </select>
+              </div>
+
+              <div id="teacher-select-wrap" style="display: none;">
+                <select id="matrix-teacher-select" onchange="AppState.selectedTeacherId = this.value; renderMatrixTable();" class="text-xs bg-slate-50 border border-border-subtle rounded-xl px-3 py-2 font-bold text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary cursor-pointer">
+                  <!-- Dynamically populated -->
+                </select>
+              </div>
+
+              <!-- Day Filter Pills (Active in Mode Kelas) -->
+              <div id="filter-days-container" class="flex items-center gap-1.5">
+                <button type="button" onclick="setSelectedDay('Senin')" data-day="Senin" class="matrix-day-btn px-3 py-1.5 rounded-lg text-xs font-bold bg-primary text-white transition-colors cursor-pointer">Senin</button>
+                <button type="button" onclick="setSelectedDay('Selasa')" data-day="Selasa" class="matrix-day-btn px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-text-secondary hover:bg-slate-200 transition-colors cursor-pointer">Selasa</button>
+                <button type="button" onclick="setSelectedDay('Rabu')" data-day="Rabu" class="matrix-day-btn px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-text-secondary hover:bg-slate-200 transition-colors cursor-pointer">Rabu</button>
+                <button type="button" onclick="setSelectedDay('Kamis')" data-day="Kamis" class="matrix-day-btn px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-text-secondary hover:bg-slate-200 transition-colors cursor-pointer">Kamis</button>
+                <button type="button" onclick="setSelectedDay('Jumat')" data-day="Jumat" class="matrix-day-btn px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-text-secondary hover:bg-slate-200 transition-colors cursor-pointer">Jumat</button>
+                <button type="button" onclick="setSelectedDay('Sabtu')" data-day="Sabtu" class="matrix-day-btn px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-text-secondary hover:bg-slate-200 transition-colors cursor-pointer">Sabtu</button>
+              </div>
+            </div>
+
+            <!-- Action Buttons: Save & Clashes Detail -->
+            <div class="flex items-center gap-2">
+              <button type="button" onclick="saveMatrixChangesToServer()" class="px-3.5 py-2 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold shadow-sm flex items-center gap-1.5 transition-all cursor-pointer">
+                <span class="material-symbols-outlined text-[16px]">cloud_upload</span>
+                <span>Simpan ke Database</span>
+              </button>
+            </div>
+
+          </div>
+
+          <!-- Matrix View Alert (If Clashes Detected) -->
+          <div id="matrix-clash-alert-box" class="hidden bg-rose-50 border border-rose-300 rounded-xl p-3 text-xs text-rose-800 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="material-symbols-outlined text-rose-600 text-[18px]">warning</span>
+              <span id="matrix-clash-alert-text">Terdeteksi konflik pada jadwal mengajar!</span>
+            </div>
+            <button type="button" onclick="openClashDetailModal()" class="font-bold underline text-rose-900 cursor-pointer">Lihat Rincian &rarr;</button>
+          </div>
+
+          <!-- Interactive Scheduling Grid Table Container -->
+          <div class="bg-surface-card rounded-2xl elevation-card border border-border-subtle overflow-hidden">
+            <div class="overflow-x-auto max-h-[680px]">
+              <table class="w-full border-collapse text-left text-xs">
+                <thead id="matrix-thead" class="sticky top-0 bg-slate-50 text-text-secondary font-bold border-b border-border-subtle z-20">
+                  <!-- Dynamically populated based on matrix mode -->
+                </thead>
+                <tbody id="matrix-tbody" class="divide-y divide-border-subtle">
+                  <!-- Dynamically populated matrix cells -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </section>
+
+        <!-- 3. VIEW: TEACHER AVAILABILITY REQUEST -->
+        <section id="view-availability" style="display: none;" class="space-y-4">
+          
+          <div class="bg-surface-card rounded-2xl p-6 elevation-card border border-border-subtle flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div class="flex items-center gap-2 mb-1">
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-800">Manajemen Komitmen Waktu</span>
+              </div>
+              <h1 class="text-xl font-black text-text-primary">Formulir Ketersediaan Mengajar Guru</h1>
+              <p class="text-xs text-text-secondary mt-1">Atur slot waktu berhalangan guru (tugas sekolah mitra, PPG, dinas luar, dll.). Sistem anti-bentrok akan otomatis memblokir slot merah.</p>
+            </div>
+            <div class="flex items-center gap-2.5">
+              <select id="avail-teacher-select" onchange="loadTeacherAvailabilityMatrix()" class="text-xs bg-slate-50 border border-border-subtle rounded-xl px-3 py-2 font-bold text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary cursor-pointer">
+                <!-- Dynamically populated -->
+              </select>
+              <button type="button" onclick="saveAvailabilityToServer()" class="px-4 py-2 rounded-xl bg-primary text-white text-xs font-bold hover:bg-primary-hover shadow-sm flex items-center gap-1.5 transition-all cursor-pointer">
+                <span class="material-symbols-outlined text-[16px]">save</span>
+                <span>Simpan Ketersediaan</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Availability Matrix Grid -->
+          <div class="bg-surface-card rounded-2xl elevation-card border border-border-subtle p-6 space-y-4">
+            
+            <div class="flex items-center justify-between flex-wrap gap-2 text-xs">
+              <div class="flex items-center gap-4">
+                <div class="flex items-center gap-2">
+                  <span class="w-4 h-4 rounded bg-emerald-100 border border-emerald-400"></span>
+                  <span class="font-medium text-text-secondary">Tersedia Mengajar</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="w-4 h-4 rounded bg-rose-100 border border-rose-400"></span>
+                  <span class="font-medium text-text-secondary">Berhalangan (Diblokir)</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <button type="button" onclick="clearCurrentTeacherBlocks()" class="text-xs font-bold text-text-secondary hover:text-text-primary px-3 py-1.5 rounded-lg border border-border-subtle hover:bg-slate-50 cursor-pointer">
+                  Buka Semua Slot
+                </button>
+                <button type="button" onclick="applyMitraTemplate()" class="text-xs font-bold text-primary px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 cursor-pointer">
+                  Template Mitra (Kamis & Sabtu)
+                </button>
+              </div>
+            </div>
+
+            <div class="overflow-x-auto">
+              <table class="w-full border-collapse text-xs">
+                <thead class="bg-slate-50 text-text-secondary font-bold border-b border-border-subtle">
+                  <tr>
+                    <th class="p-3 text-center border-r border-border-subtle w-24">JP</th>
+                    <th class="p-3 text-center border-r border-border-subtle">Senin</th>
+                    <th class="p-3 text-center border-r border-border-subtle">Selasa</th>
+                    <th class="p-3 text-center border-r border-border-subtle">Rabu</th>
+                    <th class="p-3 text-center border-r border-border-subtle">Kamis</th>
+                    <th class="p-3 text-center border-r border-border-subtle">Jumat</th>
+                    <th class="p-3 text-center">Sabtu</th>
+                  </tr>
+                </thead>
+                <tbody id="avail-matrix-tbody" class="divide-y divide-border-subtle">
+                  <!-- Dynamically populated 8 JP rows -->
+                </tbody>
+              </table>
+            </div>
+
+          </div>
+
+        </section>
+
+        <!-- 4. VIEW: MASTER DATA MANAGEMENT -->
+        <section id="view-master" style="display: none;" class="space-y-4">
+          
+          <div class="bg-surface-card rounded-2xl p-6 elevation-card border border-border-subtle flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h1 class="text-xl font-black text-text-primary">Master Data & Analisis Beban JTM</h1>
+              <p class="text-xs text-text-secondary mt-1">Kelola data guru pengajar, rombongan belajar, mata pelajaran, dan ruangan SD Negeri Pilangrejo 1.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button type="button" onclick="openAddMasterModal()" class="px-4 py-2 rounded-xl bg-primary text-white text-xs font-bold hover:bg-primary-hover shadow-sm flex items-center gap-1.5 transition-all cursor-pointer">
+                <span class="material-symbols-outlined text-[16px]">add</span>
+                <span>Tambah Data</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Master Tabs -->
+          <div class="flex items-center gap-1 border-b border-border-subtle pt-2">
+            <button type="button" onclick="setMasterTab('guru')" id="tab-master-guru" class="master-tab-btn px-4 py-2.5 rounded-t-xl text-xs font-bold bg-white text-primary border-t-2 border-primary shadow-sm flex items-center gap-2 cursor-pointer">
+              <span class="material-symbols-outlined text-[16px]">person</span>
+              <span>Guru Pengajar (24)</span>
+            </button>
+            <button type="button" onclick="setMasterTab('kelas')" id="tab-master-kelas" class="master-tab-btn px-4 py-2.5 rounded-t-xl text-xs font-bold text-text-secondary hover:text-text-primary flex items-center gap-2 cursor-pointer">
+              <span class="material-symbols-outlined text-[16px]">groups</span>
+              <span>Rombel / Kelas (12)</span>
+            </button>
+            <button type="button" onclick="setMasterTab('mapel')" id="tab-master-mapel" class="master-tab-btn px-4 py-2.5 rounded-t-xl text-xs font-bold text-text-secondary hover:text-text-primary flex items-center gap-2 cursor-pointer">
+              <span class="material-symbols-outlined text-[16px]">menu_book</span>
+              <span>Mata Pelajaran (11)</span>
+            </button>
+            <button type="button" onclick="setMasterTab('ruang')" id="tab-master-ruang" class="master-tab-btn px-4 py-2.5 rounded-t-xl text-xs font-bold text-text-secondary hover:text-text-primary flex items-center gap-2 cursor-pointer">
+              <span class="material-symbols-outlined text-[16px]">meeting_room</span>
+              <span>Ruangan / Fasilitas</span>
+            </button>
+          </div>
+
+          <!-- Master Data Table Container -->
+          <div class="bg-surface-card rounded-2xl elevation-card border border-border-subtle overflow-hidden">
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-xs">
+                <thead id="master-thead" class="bg-slate-50 text-text-secondary font-bold border-b border-border-subtle">
+                  <!-- Dynamically populated based on active master tab -->
+                </thead>
+                <tbody id="master-tbody" class="divide-y divide-border-subtle">
+                  <!-- Dynamically populated master rows -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </section>
+
+        <!-- 5. VIEW: PRATINJAU CETAK & EKSPOR SK KBM RESMI -->
+        <section id="view-export" style="display: none;" class="space-y-4">
+          
+          <!-- Export Action Controls Bar (Hidden saat Print A4) -->
+          <div id="export-action-bar" class="bg-surface-card rounded-2xl p-4 elevation-card border border-border-subtle flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h2 class="font-bold text-sm text-text-primary">Format Dokumen Resmi KBM</h2>
+              <p class="text-xs text-text-secondary">Pratinjau SK Pembagian Tugas Mengajar & Jadwal Pelajaran siap cetak standar kedinasan.</p>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <button type="button" onclick="exportToExcel()" class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm flex items-center gap-1.5 transition-all cursor-pointer">
+                <span class="material-symbols-outlined text-[16px]">table_view</span>
+                <span>Ekspor Excel (.xlsx)</span>
+              </button>
+              <button type="button" onclick="exportToWord()" class="px-3.5 py-2 rounded-xl bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold shadow-sm flex items-center gap-1.5 transition-all cursor-pointer">
+                <span class="material-symbols-outlined text-[16px]">description</span>
+                <span>Ekspor Word (.doc)</span>
+              </button>
+              <button type="button" onclick="savePdfToDriveFromBrowser()" class="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm flex items-center gap-1.5 transition-all cursor-pointer">
+                <span class="material-symbols-outlined text-[16px]">cloud_upload</span>
+                <span>Arsip Google Drive</span>
+              </button>
+              <button type="button" onclick="window.print()" class="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-bold shadow-sm flex items-center gap-1.5 transition-all cursor-pointer">
+                <span class="material-symbols-outlined text-[16px]">print</span>
+                <span>Cetak A4 Lanskap</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Printable Document Container (A4 Landscape Formatted) -->
+          <div id="printable-document" class="bg-white rounded-2xl p-8 elevation-card border border-border-subtle max-w-5xl mx-auto space-y-6 text-black">
+            
+            <!-- Kop Surat Resmi Kedinasan -->
+            <div class="border-b-4 border-double border-slate-900 pb-4 flex items-center gap-4 text-center">
+              <div class="w-16 h-16 flex-shrink-0 flex items-center justify-center font-serif text-2xl font-black border-2 border-slate-900 rounded-lg">
+                SD
+              </div>
+              <div class="flex-1">
+                <h3 class="text-xs font-bold tracking-wider uppercase">PEMERINTAH KABUPATEN MADIUN</h3>
+                <h2 class="text-sm font-extrabold uppercase">DINAS PENDIDIKAN DAN KEBUDAYAAN</h2>
+                <h1 class="text-lg font-black tracking-tight uppercase">SEKOLAH DASAR NEGERI PILANGREJO 1</h1>
+                <p class="text-[10px] text-slate-700 italic">Alamat: Jl. Raya Pilangrejo No. 12, Pilangkenceng, Kec. Pilangkenceng, Kab. Madiun 63154</p>
+                <p class="text-[9px] text-slate-600">Email: sdn.pilangrejo1@madiunkab.go.id | NPSN: 20507812 | Akreditasi: A (Amat Baik)</p>
+              </div>
+              <div class="w-16 h-16 flex-shrink-0 flex items-center justify-center border border-slate-400 p-1 rounded">
+                <!-- QR Code Validasi Keaslian Dokumen -->
+                <div class="w-full h-full bg-slate-900 flex items-center justify-center text-white text-[8px] font-bold text-center leading-tight">
+                  QR VERIFIED
+                </div>
+              </div>
+            </div>
+
+            <!-- Judul Lampiran SK -->
+            <div class="text-center space-y-1">
+              <h2 class="font-extrabold text-sm uppercase tracking-wide underline">JADWAL PELAJARAN DAN PEMBAGIAN TUGAS MENGAJAR</h2>
+              <p class="text-xs font-semibold">SEMESTER GANJIL - TAHUN PELAJARAN 2024/2025</p>
+              <p class="text-[10px] text-slate-600">Lampiran Surat Keputusan Kepala SDN Pilangrejo 1 Nomor: 421.2/084/402.107.01/2024</p>
+            </div>
+
+            <!-- Tabel Jadwal Pelajaran Resmi -->
+            <div id="printable-table-container" class="overflow-x-auto">
+              <!-- Dynamically populated printable matrix -->
+            </div>
+
+            <!-- Lembar Tanda Tangan & Pengesahan -->
+            <div class="pt-6 flex justify-between items-end text-xs">
+              <div class="space-y-1 text-left">
+                <p>Mengetahui,</p>
+                <p class="font-bold">Pengawas Pembina Gugus II</p>
+                <div class="h-20"></div>
+                <p class="font-bold underline text-sm">H. SUKIRNO, M.Pd</p>
+                <p class="text-[11px]">NIP. 19680415 199303 1 007</p>
+              </div>
+
+              <div class="space-y-1 text-center">
+                <p>Pilangrejo, 15 Juli 2024</p>
+                <p class="font-bold">Kepala SD Negeri Pilangrejo 1</p>
+                <div class="h-20 flex items-center justify-center relative">
+                  <!-- Stempel Dinas Digital Watermark -->
+                  <div class="absolute inset-0 flex items-center justify-center opacity-70 pointer-events-none">
+                    <div class="w-16 h-16 rounded-full border-2 border-dashed border-blue-700 flex items-center justify-center text-[8px] font-extrabold text-blue-800 uppercase transform -rotate-12">
+                      SDN PILANGREJO 1
+                    </div>
+                  </div>
+                  <span class="text-blue-900 font-serif italic text-lg z-10">Sri Mulyani</span>
+                </div>
+                <p class="font-bold underline text-sm">Dra. Sri Mulyani, M.Pd</p>
+                <p class="text-[11px]">NIP. 19740512 199803 2 004</p>
+              </div>
+            </div>
+
+          </div>
+
+        </section>
+
+      </main>
+
+    </div>
+
+  </div>
+
+  <!-- =========================================================================
+       MODALS DIALOG (Style display: none secara eksplisit untuk mencegah blocking click)
+       ========================================================================= -->
+
+  <!-- MODAL: SLOT PLOTTING -->
+  <div id="modal-plot-slot" style="display: none;" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 items-center justify-center p-4">
+    <div class="bg-surface-card rounded-2xl elevation-modal max-w-md w-full overflow-hidden border border-border-subtle">
+      <div class="bg-primary px-6 py-4 text-white flex items-center justify-between">
+        <div>
+          <h3 class="font-bold text-base">Plotting Jam Pelajaran</h3>
+          <p class="text-xs text-blue-100" id="modal-slot-subtitle">Senin, JP 1 (Kelas 4A)</p>
+        </div>
+        <button type="button" onclick="closePlotModal()" class="text-white/80 hover:text-white p-1 cursor-pointer">
+          <span class="material-symbols-outlined text-[20px]">close</span>
+        </button>
+      </div>
+
+      <div class="p-6 space-y-4">
+        <div id="modal-clash-warning" class="hidden p-3 rounded-xl bg-rose-50 border border-rose-300 text-rose-800 text-xs font-semibold flex items-center gap-2">
+          <span class="material-symbols-outlined text-rose-600 text-[18px]">warning</span>
+          <span id="modal-clash-text">Guru ini sudah mengajar di kelas lain!</span>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-text-primary mb-1">Mata Pelajaran:</label>
+          <select id="modal-select-mapel" onchange="checkModalSlotClash()" class="w-full text-xs bg-slate-50 border border-border-subtle rounded-lg px-3 py-2.5 font-bold text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary cursor-pointer">
+            <!-- Dynamically populated -->
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-text-primary mb-1">Guru Pengampu:</label>
+          <select id="modal-select-guru" onchange="checkModalSlotClash()" class="w-full text-xs bg-slate-50 border border-border-subtle rounded-lg px-3 py-2.5 font-bold text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary cursor-pointer">
+            <!-- Dynamically populated -->
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-text-primary mb-1">Ruangan / Fasilitas:</label>
+          <select id="modal-select-ruang" onchange="checkModalSlotClash()" class="w-full text-xs bg-slate-50 border border-border-subtle rounded-lg px-3 py-2.5 font-bold text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary cursor-pointer">
+            <!-- Dynamically populated -->
+          </select>
+        </div>
+      </div>
+
+      <div class="px-6 py-3.5 bg-slate-50 border-t border-border-subtle flex items-center justify-between">
+        <button type="button" onclick="deleteCurrentSlotAssignment()" id="btn-delete-slot" class="px-3 py-1.5 rounded-lg text-xs font-bold text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer">
+          Kosongkan Slot
+        </button>
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="closePlotModal()" class="px-3.5 py-2 rounded-lg text-xs font-semibold text-text-secondary hover:bg-slate-200 transition-colors cursor-pointer">
+            Batal
+          </button>
+          <button type="button" onclick="confirmSlotPlotting()" class="px-4 py-2 rounded-lg text-xs font-bold bg-primary text-white hover:bg-primary-hover shadow-sm transition-colors cursor-pointer">
+            Terapkan Slot
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: CLASH DETAILS -->
+  <div id="modal-clash-details" style="display: none;" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 items-center justify-center p-4">
+    <div class="bg-surface-card rounded-2xl elevation-modal max-w-lg w-full overflow-hidden border border-border-subtle">
+      <div class="bg-rose-600 px-6 py-4 text-white flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <span class="material-symbols-outlined text-[24px]">crisis_alert</span>
+          <div>
+            <h3 class="font-bold text-base">Rincian Konflik Jadwal (Clash)</h3>
+            <p class="text-xs text-rose-100" id="clash-modal-count-sub">0 bentrok terdeteksi</p>
+          </div>
+        </div>
+        <button type="button" onclick="closeClashDetailModal()" class="text-white/80 hover:text-white p-1 cursor-pointer">
+          <span class="material-symbols-outlined text-[20px]">close</span>
+        </button>
+      </div>
+
+      <div class="p-6 overflow-y-auto max-h-[380px] space-y-3" id="clash-details-list">
+        <!-- Dynamically populated -->
+      </div>
+
+      <div class="px-6 py-3.5 bg-slate-50 border-t border-border-subtle flex items-center justify-end">
+        <button type="button" onclick="closeClashDetailModal()" class="px-4 py-2 rounded-lg text-xs font-bold bg-slate-800 text-white hover:bg-slate-900 cursor-pointer">
+          Tutup & Perbaiki
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD / EDIT MASTER DATA -->
+  <div id="modal-master-crud" style="display: none;" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 items-center justify-center p-4">
+    <div class="bg-surface-card rounded-2xl elevation-modal max-w-md w-full overflow-hidden border border-border-subtle">
+      <div class="bg-primary px-6 py-4 text-white flex items-center justify-between">
+        <h3 class="font-bold text-base" id="modal-master-title">Tambah Data</h3>
+        <button type="button" onclick="closeMasterModal()" class="text-white/80 hover:text-white p-1 cursor-pointer">
+          <span class="material-symbols-outlined text-[20px]">close</span>
+        </button>
+      </div>
+
+      <div id="form-master-crud" class="p-6 space-y-3">
+        <div id="master-form-fields" class="space-y-3">
+          <!-- Dynamically populated -->
+        </div>
+
+        <div class="pt-4 border-t border-border-subtle flex items-center justify-end gap-2">
+          <button type="button" onclick="closeMasterModal()" class="px-3.5 py-2 rounded-lg text-xs font-semibold text-text-secondary hover:bg-slate-100 cursor-pointer">
+            Batal
+          </button>
+          <button type="button" onclick="handleMasterSubmit(event)" class="px-4 py-2 rounded-lg text-xs font-bold bg-primary text-white hover:bg-primary-hover shadow-sm cursor-pointer">
+            Simpan Data
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: KEPALA SEKOLAH APPROVAL -->
+  <div id="modal-approval" style="display: none;" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 items-center justify-center p-4">
+    <div class="bg-surface-card rounded-2xl elevation-modal max-w-md w-full overflow-hidden border border-border-subtle">
+      <div class="bg-emerald-600 px-6 py-4 text-white flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <span class="material-symbols-outlined text-[24px]">verified</span>
+          <div>
+            <h3 class="font-bold text-base">Pengesahan Jadwal Resmi</h3>
+            <p class="text-xs text-emerald-100">Kepala SD Negeri Pilangrejo 1</p>
+          </div>
+        </div>
+        <button type="button" onclick="closeApprovalModal()" class="text-white/80 hover:text-white p-1 cursor-pointer">
+          <span class="material-symbols-outlined text-[20px]">close</span>
+        </button>
+      </div>
+
+      <div class="p-6 space-y-4 text-xs text-text-primary">
+        <p class="leading-relaxed">
+          Dengan menekan tombol <strong>Sahkan Jadwal</strong>, jadwal pelajaran semester berjalan akan dinyatakan resmi, disahkan oleh Kepala Sekolah, dan otomatis diarsipkan ke Google Sheets & Google Drive.
+        </p>
+
+        <div class="p-3 bg-slate-50 rounded-xl border border-border-subtle space-y-1.5 font-medium">
+          <div class="flex justify-between">
+            <span class="text-text-secondary">Total Rombel:</span>
+            <span class="font-bold">12 Rombel</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-text-secondary">Status Bentrok:</span>
+            <span class="font-bold text-emerald-600" id="approval-clash-status">0 Bentrok (Aman)</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-text-secondary">Tahun Ajaran:</span>
+            <span class="font-bold">2024/2025 (Ganjil)</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="px-6 py-3.5 bg-slate-50 border-t border-border-subtle flex items-center justify-end gap-2">
+        <button type="button" onclick="closeApprovalModal()" class="px-3.5 py-2 rounded-lg text-xs font-semibold text-text-secondary hover:bg-slate-100 cursor-pointer">
+          Tutup
+        </button>
+        <button type="button" onclick="submitScheduleApproval('APPROVED')" class="px-4 py-2 rounded-lg text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm flex items-center gap-1.5 cursor-pointer">
+          <span class="material-symbols-outlined text-[16px]">check_circle</span>
+          <span>Sahkan Jadwal Sekarang</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATION CONTAINER -->
+  <div id="toast-container" class="fixed top-5 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- Application Logic Scripts -->
+  <script src="./js/config.js"></script>
+  <script src="./js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,186 @@
+/**
+ * ============================================================================
+ * SiJaAnti PRO - Stylesheet (style.css)
+ * Standar: /gas-pwa-github, /ui-ux-pro-max
+ * ============================================================================
+ */
+
+:root {
+  --primary: #2563EB;
+  --primary-hover: #1D4ED8;
+  --primary-gradient: linear-gradient(135deg, #2563EB 0%, #3525CD 100%);
+  --surface-bg: #F8FAFC;
+  --surface-card: #FFFFFF;
+  --border-subtle: #E2E8F0;
+  --border-strong: #CBD5E1;
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-muted: #94A3B8;
+  
+  --clash-bg: #FEF2F2;
+  --clash-border: #F87171;
+  --clash-text: #991B1B;
+  
+  --valid-bg: #ECFDF5;
+  --valid-border: #34D399;
+  --valid-text: #065F46;
+
+  --warning-bg: #FFFBEB;
+  --warning-border: #FBBF24;
+  --warning-text: #92400E;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--surface-bg);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Diagonal Stripe Pattern untuk Jam Istirahat / Upacara Bendera */
+.slot-striped {
+  background-color: #F8FAFC;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    #F1F5F9,
+    #F1F5F9 10px,
+    #FFFFFF 10px,
+    #FFFFFF 20px
+  );
+  border: 1px dashed #CBD5E1;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #F1F5F9;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+/* Sticky Column pada Matrix Table */
+.sticky-time-col {
+  position: sticky;
+  left: 0;
+  z-index: 20;
+  background-color: #FFFFFF;
+  box-shadow: 2px 0 6px rgba(0, 0, 0, 0.04);
+}
+
+th.sticky-time-col {
+  z-index: 30;
+  background-color: #F8FAFC;
+}
+
+/* Animasi Pulse untuk Peringatan Bentrok */
+@keyframes pulseClash {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+  }
+}
+
+.clash-pulse {
+  animation: pulseClash 2s infinite cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+@keyframes toastSlideIn {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-toast {
+  animation: toastSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Elevation Card & Modal Soft Shadow */
+.elevation-card {
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+}
+
+.elevation-modal {
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+}
+
+/* PWA Install Notification Bar */
+.pwa-install-banner {
+  animation: toastSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Cetak SK KBM Resmi (@media print) A4 Landscape */
+@media print {
+  body {
+    background: #FFFFFF !important;
+    color: #000000 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Sembunyikan semua elemen UI selain kontainer cetak */
+  #sidebar,
+  #top-header,
+  #view-login,
+  #view-dashboard,
+  #view-matrix,
+  #view-availability,
+  #view-master,
+  #export-action-bar,
+  #toast-container,
+  #pwa-install-modal,
+  .no-print {
+    display: none !important;
+  }
+
+  .lg\:pl-64 {
+    padding-left: 0 !important;
+  }
+
+  #view-export {
+    display: block !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  #printable-document {
+    box-shadow: none !important;
+    border: none !important;
+    padding: 10mm !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  @page {
+    size: A4 landscape;
+    margin: 8mm;
+  }
+
+  table {
+    page-break-inside: avoid;
+  }
+
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+}
