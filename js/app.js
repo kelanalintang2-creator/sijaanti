@@ -59,7 +59,8 @@ const AppState = {
     username: '19791104 200501 1 003',
     name: 'Bambang Sugiantoro, S.Pd.SD',
     nip: '19791104 200501 1 003',
-    title: 'Tim Kurikulum (Admin)'
+    title: 'Tim Kurikulum (Admin)',
+    menuAccess: ['dashboard', 'beban', 'matrix', 'availability', 'timeconfig', 'master', 'school', 'users', 'export']
   },
   activeView: 'dashboard',
   matrixMode: 'class', // 'class' | 'single-class' | 'teacher'
@@ -67,6 +68,14 @@ const AppState = {
   selectedClassId: 'K07', // 4A
   selectedTeacherId: 'G02', // Ahmad Fauzi
   activeMasterTab: 'guru',
+  selectedMasterIds: new Set(),
+  users: [],
+  beban: [],
+  timeConfig: {
+    days: {},
+    classLimits: []
+  },
+  schoolLogoBase64: null,
   master: {
     guru: [],
     kelas: [],
@@ -82,7 +91,9 @@ const AppState = {
   activeSlotEdit: null,
   jtmChartInstance: null,
   loginSelectedRole: 'admin',
-  deferredInstallPrompt: null
+  deferredInstallPrompt: null,
+  _pendingImport: null,
+  _generatedScheduleTemp: null
 };
 
 // ============================================================================
@@ -412,7 +423,7 @@ function navigateView(viewName) {
   AppState.activeView = viewName;
   showAppLayout();
 
-  const views = ['dashboard', 'matrix', 'availability', 'master', 'export'];
+  const views = ['dashboard', 'beban', 'matrix', 'availability', 'timeconfig', 'master', 'school', 'users', 'export'];
   views.forEach(v => {
     const el = document.getElementById(`view-${v}`);
     if (el) {
@@ -450,9 +461,13 @@ function navigateView(viewName) {
 function renderCurrentView() {
   switch (AppState.activeView) {
     case 'dashboard': renderDashboardView(); break;
+    case 'beban': renderBebanView(); break;
     case 'matrix': renderMatrixView(); break;
     case 'availability': renderAvailabilityView(); break;
+    case 'timeconfig': renderTimeConfigView(); break;
     case 'master': renderMasterView(); break;
+    case 'school': renderSchoolView(); break;
+    case 'users': renderUsersView(); break;
     case 'export': renderExportView(); break;
   }
 }
@@ -478,6 +493,24 @@ function setupRoleUI() {
 
   const approveBtn = document.getElementById('btn-approve-kbm');
   if (approveBtn) approveBtn.style.display = user.role === 'kepsek' ? 'flex' : 'none';
+
+  // REVISI 2: Filter Hak Akses Menu Navigasi Berdasarkan currentUser.menuAccess
+  const menuAccess = user.menuAccess || '*';
+  const allNavViews = ['dashboard', 'beban', 'matrix', 'availability', 'timeconfig', 'master', 'export', 'school', 'users'];
+  allNavViews.forEach(v => {
+    const btn = document.getElementById(`nav-btn-${v}`);
+    if (btn) {
+      let allowed = false;
+      if (menuAccess === '*' || user.role === 'admin') {
+        allowed = true;
+      } else if (Array.isArray(menuAccess)) {
+        allowed = menuAccess.includes(v);
+      } else if (typeof menuAccess === 'string') {
+        allowed = menuAccess.split(',').map(s => s.trim()).includes(v);
+      }
+      btn.style.display = allowed ? 'flex' : 'none';
+    }
+  });
 }
 
 // ============================================================================
@@ -1357,10 +1390,13 @@ function applyMitraTemplate() {
 }
 
 // ============================================================================
-// 12. MASTER DATA CRUD
+// 12. MASTER DATA CRUD & IMPORT / EXPORT (/gas-pro-api)
 // ============================================================================
 function setMasterTab(tabName) {
   AppState.activeMasterTab = tabName;
+  AppState.selectedMasterIds.clear();
+  updateBulkDeleteButton();
+
   document.querySelectorAll('.master-tab-btn').forEach(btn => {
     btn.className = 'master-tab-btn px-4 py-2.5 rounded-t-xl text-xs font-bold text-text-secondary hover:text-text-primary flex items-center gap-2';
   });
@@ -1377,10 +1413,15 @@ function renderMasterView() {
   if (!thead || !tbody) return;
 
   const tab = AppState.activeMasterTab;
+  const items = AppState.master[tab] || [];
+  const allChecked = items.length > 0 && items.every(it => AppState.selectedMasterIds.has(it.id));
 
   if (tab === 'guru') {
     thead.innerHTML = `
       <tr>
+        <th class="p-3 w-10 text-center">
+          <input type="checkbox" id="master-check-all" onchange="toggleSelectAllMaster(this.checked)" class="rounded text-primary focus:ring-primary cursor-pointer" ${allChecked ? 'checked' : ''}/>
+        </th>
         <th class="p-3">Nama Guru & NIP</th>
         <th class="p-3">Mapel Utama</th>
         <th class="p-3">Status</th>
@@ -1403,9 +1444,13 @@ function renderMasterView() {
       const terplot = teacherJtmMap[g.id] || 0;
       const target = g.target_jtm || 24;
       const isComplete = terplot >= target;
+      const isChecked = AppState.selectedMasterIds.has(g.id);
 
       return `
-        <tr class="hover:bg-slate-50 transition-colors">
+        <tr class="hover:bg-slate-50 transition-colors ${isChecked ? 'bg-blue-50/50' : ''}">
+          <td class="p-3 text-center">
+            <input type="checkbox" value="${g.id}" onchange="toggleMasterItemSelection('${g.id}', this.checked)" class="master-row-check rounded text-primary focus:ring-primary cursor-pointer" ${isChecked ? 'checked' : ''}/>
+          </td>
           <td class="p-3 font-semibold text-text-primary">
             <div class="font-bold text-sm text-text-primary">${g.nama}${g.gelar ? ', ' + g.gelar : ''}</div>
             <div class="text-[11px] text-text-secondary">NIP. ${g.nip || '-'}</div>
@@ -1427,7 +1472,7 @@ function renderMasterView() {
             </span>
           </td>
           <td class="p-3 text-right">
-            <button onclick="editMasterItem('guru', '${g.id}')" class="p-1 rounded text-text-secondary hover:text-primary hover:bg-slate-100">
+            <button onclick="editMasterItem('guru', '${g.id}')" class="p-1 rounded text-text-secondary hover:text-primary hover:bg-slate-100" title="Edit Guru">
               <span class="material-symbols-outlined text-[18px]">edit</span>
             </button>
           </td>
@@ -1438,6 +1483,9 @@ function renderMasterView() {
   } else if (tab === 'kelas') {
     thead.innerHTML = `
       <tr>
+        <th class="p-3 w-10 text-center">
+          <input type="checkbox" id="master-check-all" onchange="toggleSelectAllMaster(this.checked)" class="rounded text-primary focus:ring-primary cursor-pointer" ${allChecked ? 'checked' : ''}/>
+        </th>
         <th class="p-3">Kode Rombel</th>
         <th class="p-3">Nama Rombongan Belajar</th>
         <th class="p-3">Tingkat</th>
@@ -1448,41 +1496,59 @@ function renderMasterView() {
     const guruMap = {};
     AppState.master.guru.forEach(g => { guruMap[g.id] = g.nama; });
 
-    tbody.innerHTML = (AppState.master.kelas || []).map(k => `
-      <tr class="hover:bg-slate-50 transition-colors">
-        <td class="p-3 font-bold text-primary">${k.kode_kelas}</td>
-        <td class="p-3 font-bold text-text-primary">${k.nama_rombel}</td>
-        <td class="p-3 font-semibold text-text-secondary">Kelas ${k.tingkat}</td>
-        <td class="p-3 font-medium text-text-primary">${guruMap[k.wali_kelas_id] || '-'}</td>
-        <td class="p-3 text-center font-bold text-text-primary">${k.total_siswa || 28} Anak</td>
-      </tr>
-    `).join('');
+    tbody.innerHTML = (AppState.master.kelas || []).map(k => {
+      const isChecked = AppState.selectedMasterIds.has(k.id);
+      return `
+        <tr class="hover:bg-slate-50 transition-colors ${isChecked ? 'bg-blue-50/50' : ''}">
+          <td class="p-3 text-center">
+            <input type="checkbox" value="${k.id}" onchange="toggleMasterItemSelection('${k.id}', this.checked)" class="master-row-check rounded text-primary focus:ring-primary cursor-pointer" ${isChecked ? 'checked' : ''}/>
+          </td>
+          <td class="p-3 font-bold text-primary">${k.kode_kelas}</td>
+          <td class="p-3 font-bold text-text-primary">${k.nama_rombel}</td>
+          <td class="p-3 font-semibold text-text-secondary">Kelas ${k.tingkat}</td>
+          <td class="p-3 font-medium text-text-primary">${guruMap[k.wali_kelas_id] || '-'}</td>
+          <td class="p-3 text-center font-bold text-text-primary">${k.total_siswa || 28} Anak</td>
+        </tr>
+      `;
+    }).join('');
 
   } else if (tab === 'mapel') {
     thead.innerHTML = `
       <tr>
+        <th class="p-3 w-10 text-center">
+          <input type="checkbox" id="master-check-all" onchange="toggleSelectAllMaster(this.checked)" class="rounded text-primary focus:ring-primary cursor-pointer" ${allChecked ? 'checked' : ''}/>
+        </th>
         <th class="p-3">Kode</th>
         <th class="p-3">Nama Mata Pelajaran</th>
         <th class="p-3">Kategori</th>
         <th class="p-3 text-center">Alokasi JP / Minggu</th>
       </tr>
     `;
-    tbody.innerHTML = (AppState.master.mapel || []).map(m => `
-      <tr class="hover:bg-slate-50 transition-colors">
-        <td class="p-3 font-bold text-primary">${m.kode}</td>
-        <td class="p-3 font-bold text-text-primary">${m.nama}</td>
-        <td class="p-3">
-          <span class="px-2 py-0.5 rounded text-[10px] font-bold ${m.kategori === 'Wajib' ? 'bg-indigo-100 text-indigo-800' : 'bg-amber-100 text-amber-800'}">
-            ${m.kategori}
-          </span>
-        </td>
-        <td class="p-3 text-center font-bold text-text-primary">${m.alokasi_jp_minggu} JP</td>
-      </tr>
-    `).join('');
+    tbody.innerHTML = (AppState.master.mapel || []).map(m => {
+      const isChecked = AppState.selectedMasterIds.has(m.id);
+      return `
+        <tr class="hover:bg-slate-50 transition-colors ${isChecked ? 'bg-blue-50/50' : ''}">
+          <td class="p-3 text-center">
+            <input type="checkbox" value="${m.id}" onchange="toggleMasterItemSelection('${m.id}', this.checked)" class="master-row-check rounded text-primary focus:ring-primary cursor-pointer" ${isChecked ? 'checked' : ''}/>
+          </td>
+          <td class="p-3 font-bold text-primary">${m.kode}</td>
+          <td class="p-3 font-bold text-text-primary">${m.nama}</td>
+          <td class="p-3">
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold ${m.kategori === 'Wajib' ? 'bg-indigo-100 text-indigo-800' : 'bg-amber-100 text-amber-800'}">
+              ${m.kategori}
+            </span>
+          </td>
+          <td class="p-3 text-center font-bold text-text-primary">${m.alokasi_jp_minggu} JP</td>
+        </tr>
+      `;
+    }).join('');
 
   } else {
     thead.innerHTML = `
       <tr>
+        <th class="p-3 w-10 text-center">
+          <input type="checkbox" id="master-check-all" onchange="toggleSelectAllMaster(this.checked)" class="rounded text-primary focus:ring-primary cursor-pointer" ${allChecked ? 'checked' : ''}/>
+        </th>
         <th class="p-3">Kode Ruang</th>
         <th class="p-3">Nama Fasilitas & Ruangan</th>
         <th class="p-3">Jenis</th>
@@ -1490,15 +1556,221 @@ function renderMasterView() {
         <th class="p-3">Fasilitas Penunjang</th>
       </tr>
     `;
-    tbody.innerHTML = (AppState.master.ruang || []).map(r => `
-      <tr class="hover:bg-slate-50 transition-colors">
-        <td class="p-3 font-bold text-primary">${r.kode}</td>
-        <td class="p-3 font-bold text-text-primary">${r.nama}</td>
-        <td class="p-3 font-medium text-text-secondary">${r.jenis}</td>
-        <td class="p-3 text-center font-bold text-text-primary">${r.kapasitas} Orang</td>
-        <td class="p-3 text-text-secondary">${r.fasilitas || '-'}</td>
-      </tr>
-    `).join('');
+    tbody.innerHTML = (AppState.master.ruang || []).map(r => {
+      const isChecked = AppState.selectedMasterIds.has(r.id);
+      return `
+        <tr class="hover:bg-slate-50 transition-colors ${isChecked ? 'bg-blue-50/50' : ''}">
+          <td class="p-3 text-center">
+            <input type="checkbox" value="${r.id}" onchange="toggleMasterItemSelection('${r.id}', this.checked)" class="master-row-check rounded text-primary focus:ring-primary cursor-pointer" ${isChecked ? 'checked' : ''}/>
+          </td>
+          <td class="p-3 font-bold text-primary">${r.kode}</td>
+          <td class="p-3 font-bold text-text-primary">${r.nama}</td>
+          <td class="p-3 font-medium text-text-secondary">${r.jenis}</td>
+          <td class="p-3 text-center font-bold text-text-primary">${r.kapasitas} Orang</td>
+          <td class="p-3 text-text-secondary">${r.fasilitas || '-'}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  updateBulkDeleteButton();
+}
+
+function toggleSelectAllMaster(checked) {
+  const tab = AppState.activeMasterTab;
+  const items = AppState.master[tab] || [];
+  if (checked) {
+    items.forEach(it => AppState.selectedMasterIds.add(it.id));
+  } else {
+    AppState.selectedMasterIds.clear();
+  }
+  renderMasterView();
+}
+
+function toggleMasterItemSelection(id, checked) {
+  if (checked) {
+    AppState.selectedMasterIds.add(id);
+  } else {
+    AppState.selectedMasterIds.delete(id);
+  }
+  updateBulkDeleteButton();
+}
+
+function updateBulkDeleteButton() {
+  const btn = document.getElementById('btn-bulk-delete-master');
+  const txt = document.getElementById('bulk-delete-count-text');
+  const count = AppState.selectedMasterIds.size;
+  if (!btn) return;
+
+  if (count > 0) {
+    btn.style.display = 'inline-flex';
+    if (txt) txt.textContent = `Hapus (${count})`;
+  } else {
+    btn.style.display = 'none';
+  }
+}
+
+async function deleteSelectedMasterItems() {
+  const count = AppState.selectedMasterIds.size;
+  if (count === 0) return;
+  const tab = AppState.activeMasterTab;
+
+  if (!confirm(`Apakah Anda yakin ingin menghapus ${count} data ${tab} terpilih?`)) {
+    return;
+  }
+
+  const idsToDelete = Array.from(AppState.selectedMasterIds);
+  AppState.master[tab] = (AppState.master[tab] || []).filter(it => !idsToDelete.includes(it.id));
+  AppState.selectedMasterIds.clear();
+
+  saveToLocalStorage();
+  renderMasterView();
+  showToast(`${count} data ${tab} berhasil dihapus dari memori`, 'success');
+
+  // Sinkronkan ke server
+  const res = await apiPost('batchDeleteMaster', { tab: tab, ids: idsToDelete });
+  if (res && res.success) {
+    showToast(`Sinkronisasi hapus ke database Sheets berhasil`, 'success');
+  }
+}
+
+// ----------------------------------------------------------------------------
+// REVISI 3: TEMPLATE UNDUH & IMPOR FILE EXCEL / CSV
+// ----------------------------------------------------------------------------
+function downloadMasterTemplate() {
+  if (typeof XLSX === 'undefined') {
+    return showToast('Library Excel (SheetJS) belum siap. Silakan muat ulang.', 'warning');
+  }
+
+  const tab = AppState.activeMasterTab;
+  let headers = [];
+  let sampleData = [];
+  let filename = `Template_Master_${tab.toUpperCase()}_SDN_Pilangrejo1.xlsx`;
+
+  if (tab === 'guru') {
+    headers = ['nama', 'gelar', 'nip', 'mapel_utama', 'target_jtm', 'status_kepegawaian'];
+    sampleData = [
+      { nama: 'Budi Santoso', gelar: 'S.Pd.SD', nip: '198501012010011005', mapel_utama: 'Guru Kelas 4', target_jtm: 24, status_kepegawaian: 'PNS' },
+      { nama: 'Siti Aminah', gelar: 'S.Pd.I', nip: '199002022015022003', mapel_utama: 'Pendidikan Agama Islam', target_jtm: 24, status_kepegawaian: 'P3K' }
+    ];
+  } else if (tab === 'kelas') {
+    headers = ['kode_kelas', 'nama_rombel', 'tingkat', 'wali_kelas_id', 'total_siswa'];
+    sampleData = [
+      { kode_kelas: '4A', nama_rombel: 'Kelas 4A (Garuda)', tingkat: 4, wali_kelas_id: 'G02', total_siswa: 30 },
+      { kode_kelas: '4B', nama_rombel: 'Kelas 4B (Rajawali)', tingkat: 4, wali_kelas_id: 'G11', total_siswa: 29 }
+    ];
+  } else if (tab === 'mapel') {
+    headers = ['kode', 'nama', 'kategori', 'alokasi_jp_minggu'];
+    sampleData = [
+      { kode: 'MTK', nama: 'Matematika', kategori: 'Wajib', alokasi_jp_minggu: 5 },
+      { kode: 'IPAS', nama: 'Ilmu Pengetahuan Alam & Sosial', kategori: 'Wajib', alokasi_jp_minggu: 5 }
+    ];
+  } else {
+    headers = ['kode', 'nama', 'jenis', 'kapasitas', 'fasilitas'];
+    sampleData = [
+      { kode: 'RK-4A', nama: 'Ruang Kelas 4A', jenis: 'Kelas', kapasitas: 32, fasilitas: 'Papan Tulis, Proyektor' },
+      { kode: 'LAB-KOMP', nama: 'Laboratorium Komputer', jenis: 'Laboratorium', kapasitas: 36, fasilitas: '32 Unit PC, AC' }
+    ];
+  }
+
+  const ws = XLSX.utils.json_to_sheet(sampleData, { header: headers });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, `Master_${tab}`);
+  XLSX.writeFile(wb, filename);
+
+  showToast(`Template ${tab.toUpperCase()} berhasil diunduh (.xlsx)`, 'success');
+}
+
+function handleMasterFileSelect(e) {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+
+  if (typeof XLSX === 'undefined') {
+    return showToast('Library SheetJS belum siap, silakan refresh halaman.', 'error');
+  }
+
+  const reader = new FileReader();
+  reader.onload = function(evt) {
+    try {
+      const data = new Uint8Array(evt.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      const rows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+
+      if (!rows || rows.length === 0) {
+        showToast('Berkas tidak berisi data valid.', 'warning');
+        return;
+      }
+
+      openImportPreviewModal(rows);
+    } catch (err) {
+      showToast('Gagal membaca berkas Excel/CSV: ' + err.message, 'error');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+  e.target.value = '';
+}
+
+function openImportPreviewModal(rows) {
+  AppState._pendingImport = rows;
+  const modal = document.getElementById('modal-import-preview');
+  const thead = document.getElementById('import-preview-thead');
+  const tbody = document.getElementById('import-preview-tbody');
+  const summary = document.getElementById('import-summary-text');
+  const tab = AppState.activeMasterTab;
+
+  if (summary) {
+    summary.textContent = `Terdeteksi ${rows.length} baris data siap diimpor ke Master ${tab.toUpperCase()}.`;
+  }
+
+  if (rows.length > 0 && thead && tbody) {
+    const keys = Object.keys(rows[0]);
+    thead.innerHTML = `<tr>${keys.map(k => `<th class="p-2 border border-slate-200">${k}</th>`).join('')}</tr>`;
+    tbody.innerHTML = rows.slice(0, 10).map(r => `
+      <tr>${keys.map(k => `<td class="p-2 border border-slate-200">${r[k] !== undefined ? r[k] : ''}</td>`).join('')}</tr>
+    `).join('') + (rows.length > 10 ? `<tr><td colspan="${keys.length}" class="p-2 text-center text-text-secondary italic">...dan ${rows.length - 10} baris lainnya</td></tr>` : '');
+  }
+
+  if (modal) {
+    modal.style.display = 'flex';
+    modal.classList.remove('hidden');
+  }
+}
+
+function closeImportPreviewModal() {
+  const modal = document.getElementById('modal-import-preview');
+  if (modal) {
+    modal.style.display = 'none';
+    modal.classList.add('hidden');
+  }
+  AppState._pendingImport = null;
+}
+
+async function confirmImportData() {
+  const rows = AppState._pendingImport;
+  if (!rows || rows.length === 0) return;
+
+  const tab = AppState.activeMasterTab;
+  let counter = (AppState.master[tab] || []).length;
+
+  const formattedItems = rows.map(r => {
+    counter++;
+    const prefix = tab === 'guru' ? 'G' : tab === 'kelas' ? 'K' : tab === 'mapel' ? 'M' : 'R_';
+    const id = r.id || `${prefix}${counter.toString().padStart(2, '0')}`;
+    return { ...r, id };
+  });
+
+  AppState.master[tab] = (AppState.master[tab] || []).concat(formattedItems);
+  saveToLocalStorage();
+  closeImportPreviewModal();
+  renderMasterView();
+  showToast(`Berhasil mengimpor ${formattedItems.length} data ke Master ${tab.toUpperCase()}!`, 'success');
+
+  // Kirim batch ke REST API Backend
+  const res = await apiPost('batchImportMaster', { tab: tab, items: formattedItems });
+  if (res && res.success) {
+    showToast(`Sinkronisasi ${formattedItems.length} data ke Google Sheets berhasil!`, 'success');
   }
 }
 
@@ -1612,6 +1884,724 @@ async function handleMasterSubmit(e) {
     // Sinkronisasi ke REST API
     apiPost('saveMaster', { tab: 'guru', item: newGuru });
   }
+}
+
+// ============================================================================
+// REVISI 1: PENGATURAN IDENTITAS SEKOLAH & LOGO RESMI
+// ============================================================================
+function renderSchoolView() {
+  loadSchoolIdentity();
+}
+
+function loadSchoolIdentity() {
+  const sekolah = AppState.master.sekolah || [];
+  const cfg = {};
+  if (Array.isArray(sekolah)) {
+    sekolah.forEach(row => {
+      if (row.kunci) cfg[row.kunci] = row.nilai;
+      else if (row.key) cfg[row.key] = row.value;
+    });
+  } else if (typeof sekolah === 'object') {
+    Object.assign(cfg, sekolah);
+  }
+
+  const setVal = (id, val) => {
+    const el = document.getElementById(id);
+    if (el && val !== undefined && val !== null) el.value = val;
+  };
+
+  setVal('sch-nama', cfg.nama_sekolah || 'Sekolah Dasar Negeri Pilangrejo 1');
+  setVal('sch-npsn', cfg.npsn || '20507812');
+  setVal('sch-nss', cfg.nss || '101054002001');
+  setVal('sch-akreditasi', cfg.akreditasi || 'A (Amat Baik)');
+  setVal('sch-alamat', cfg.alamat || 'Jl. Raya Pilangrejo No. 12, Pilangkenceng, Kab. Madiun 63154');
+  setVal('sch-email', cfg.email || 'sdn.pilangrejo1@madiunkab.go.id');
+  setVal('sch-website', cfg.website || 'sdn-pilangrejo1.sch.id');
+  setVal('sch-kepsek', cfg.kepala_sekolah || 'Dra. Sri Mulyani, M.Pd');
+  setVal('sch-nip-kepsek', cfg.nip_kepala_sekolah || '19740512 199803 2 004');
+  setVal('sch-tahun-ajaran', cfg.tahun_ajaran || '2024/2025');
+  setVal('sch-semester', cfg.semester || 'Ganjil');
+
+  // Update Logo preview
+  const logoUrl = cfg.logo_sekolah || AppState.schoolLogoBase64;
+  updateSchoolLogoUI(logoUrl);
+
+  // Update Header / Kop elements
+  const headerSchEl = document.getElementById('header-school-name');
+  if (headerSchEl) headerSchEl.textContent = cfg.nama_sekolah || 'SDN Pilangrejo 1';
+}
+
+function updateSchoolLogoUI(logoSrc) {
+  const imgEl = document.getElementById('school-logo-preview');
+  const placeholderEl = document.getElementById('school-logo-placeholder');
+  const printLogoEl = document.getElementById('print-logo-container');
+
+  if (logoSrc) {
+    if (imgEl) {
+      imgEl.src = logoSrc;
+      imgEl.style.display = 'block';
+    }
+    if (placeholderEl) placeholderEl.style.display = 'none';
+    if (printLogoEl) {
+      printLogoEl.innerHTML = `<img src="${logoSrc}" alt="Logo Sekolah" class="w-full h-full object-contain">`;
+    }
+  } else {
+    if (imgEl) imgEl.style.display = 'none';
+    if (placeholderEl) placeholderEl.style.display = 'flex';
+  }
+}
+
+function handleSchoolLogoUpload(e) {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+
+  if (file.size > 2 * 1024 * 1024) {
+    showToast('Ukuran logo maksimal 2MB!', 'warning');
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = function(evt) {
+    AppState.schoolLogoBase64 = evt.target.result;
+    updateSchoolLogoUI(AppState.schoolLogoBase64);
+    showToast('Pratinjau logo berhasil diperbarui. Klik Simpan & Sinkronkan.', 'info');
+  };
+  reader.readAsDataURL(file);
+}
+
+async function saveSchoolIdentityForm() {
+  const getVal = id => document.getElementById(id)?.value?.trim() || '';
+
+  const config = {
+    nama_sekolah: getVal('sch-nama'),
+    npsn: getVal('sch-npsn'),
+    nss: getVal('sch-nss'),
+    akreditasi: getVal('sch-akreditasi'),
+    alamat: getVal('sch-alamat'),
+    email: getVal('sch-email'),
+    website: getVal('sch-website'),
+    kepala_sekolah: getVal('sch-kepsek'),
+    nip_kepala_sekolah: getVal('sch-nip-kepsek'),
+    tahun_ajaran: getVal('sch-tahun-ajaran'),
+    semester: getVal('sch-semester'),
+    logo_sekolah: AppState.schoolLogoBase64 || ''
+  };
+
+  // Optimistic update
+  AppState.master.sekolah = Object.keys(config).map(k => ({ kunci: k, nilai: config[k] }));
+  saveToLocalStorage();
+  loadSchoolIdentity();
+
+  showToast('Menyimpan identitas sekolah & menyinkronkan logo ke database...', 'info');
+  const btn = document.getElementById('btn-save-school');
+  if (btn) btn.classList.add('opacity-75');
+
+  const res = await apiPost('saveSchoolIdentity', { config, logoBase64: AppState.schoolLogoBase64 });
+  if (btn) btn.classList.remove('opacity-75');
+
+  if (res && res.success) {
+    showToast('Identitas sekolah berhasil diperbarui dan disinkronkan ke Sheets!', 'success');
+  } else {
+    showToast('Identitas sekolah disimpan di penyimpanan lokal browser', 'info');
+  }
+}
+
+// ============================================================================
+// REVISI 2: PENGATURAN USER & HAK AKSES MENU (RBAC)
+// ============================================================================
+function renderUsersView() {
+  const tbody = document.getElementById('users-table-tbody');
+  if (!tbody) return;
+
+  const users = AppState.users || [];
+  if (users.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-slate-500">Belum ada akun pengguna. Klik Tambah Pengguna.</td></tr>`;
+    return;
+  }
+
+  const roleLabels = {
+    admin: { label: 'Kurikulum (Admin)', color: 'bg-indigo-100 text-indigo-800' },
+    kepsek: { label: 'Kepala Sekolah', color: 'bg-emerald-100 text-emerald-800' },
+    guru: { label: 'Guru Pengajar', color: 'bg-blue-100 text-blue-800' },
+    operator: { label: 'Operator', color: 'bg-slate-100 text-slate-800' }
+  };
+
+  tbody.innerHTML = users.map(u => {
+    const roleInfo = roleLabels[u.role] || { label: u.role, color: 'bg-slate-100 text-slate-800' };
+    const perms = Array.isArray(u.menu_access) ? u.menu_access : (u.menu_access ? String(u.menu_access).split(',') : ['*']);
+    const isAll = perms.includes('*');
+
+    return `
+      <tr class="hover:bg-slate-50 transition-colors">
+        <td class="p-3 font-mono font-bold text-text-primary">${u.username}</td>
+        <td class="p-3 font-bold text-text-primary">${u.nama || '-'}</td>
+        <td class="p-3">
+          <span class="px-2 py-0.5 rounded text-[10px] font-bold ${roleInfo.color}">${roleInfo.label}</span>
+        </td>
+        <td class="p-3">
+          <div class="flex flex-wrap gap-1">
+            ${isAll 
+              ? `<span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[10px]">Semua Menu (Full Access)</span>` 
+              : perms.map(p => `<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-semibold">${p}</span>`).join('')}
+          </div>
+        </td>
+        <td class="p-3 text-center">
+          <span class="px-2 py-0.5 rounded text-[10px] font-bold ${u.status === 'Aktif' || !u.status ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}">
+            ${u.status || 'Aktif'}
+          </span>
+        </td>
+        <td class="p-3 text-right">
+          <div class="flex items-center justify-end gap-1">
+            <button type="button" onclick="openAddUserModal('${u.username}')" class="p-1 rounded text-text-secondary hover:text-primary hover:bg-slate-100" title="Edit Pengguna">
+              <span class="material-symbols-outlined text-[18px]">edit</span>
+            </button>
+            <button type="button" onclick="deleteUser('${u.username}')" class="p-1 rounded text-text-secondary hover:text-rose-600 hover:bg-slate-100" title="Hapus Pengguna">
+              <span class="material-symbols-outlined text-[18px]">delete</span>
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function openAddUserModal(username = null) {
+  const modal = document.getElementById('modal-user-crud');
+  const title = document.getElementById('modal-user-title');
+  const userIn = document.getElementById('crud-user-username');
+  const namaIn = document.getElementById('crud-user-nama');
+  const passIn = document.getElementById('crud-user-password');
+  const roleIn = document.getElementById('crud-user-role');
+
+  if (username) {
+    const u = (AppState.users || []).find(it => it.username === username);
+    if (u) {
+      if (title) title.textContent = `Edit Pengguna (${u.username})`;
+      if (userIn) { userIn.value = u.username; userIn.disabled = true; }
+      if (namaIn) namaIn.value = u.nama || '';
+      if (passIn) { passIn.value = ''; passIn.placeholder = 'Kosongkan jika tidak ubah sandi'; }
+      if (roleIn) roleIn.value = u.role || 'guru';
+      
+      const perms = Array.isArray(u.menu_access) ? u.menu_access : (u.menu_access ? String(u.menu_access).split(',') : ['*']);
+      document.querySelectorAll('.user-menu-chk').forEach(chk => {
+        chk.checked = perms.includes('*') || perms.includes(chk.value);
+      });
+    }
+  } else {
+    if (title) title.textContent = 'Tambah Pengguna Baru';
+    if (userIn) { userIn.value = ''; userIn.disabled = false; }
+    if (namaIn) namaIn.value = '';
+    if (passIn) { passIn.value = ''; passIn.placeholder = 'Masukkan kata sandi baru...'; }
+    if (roleIn) roleIn.value = 'admin';
+    autoSelectMenuCheckboxesByRole('admin');
+  }
+
+  if (modal) {
+    modal.style.display = 'flex';
+    modal.classList.remove('hidden');
+  }
+}
+
+function closeUserModal() {
+  const modal = document.getElementById('modal-user-crud');
+  if (modal) {
+    modal.style.display = 'none';
+    modal.classList.add('hidden');
+  }
+}
+
+function autoSelectMenuCheckboxesByRole(role) {
+  document.querySelectorAll('.user-menu-chk').forEach(chk => {
+    if (role === 'admin') chk.checked = true;
+    else if (role === 'kepsek') chk.checked = ['dashboard', 'matrix', 'export', 'school'].includes(chk.value);
+    else if (role === 'guru') chk.checked = ['matrix', 'availability'].includes(chk.value);
+    else chk.checked = ['dashboard', 'master'].includes(chk.value);
+  });
+}
+
+async function saveUserSubmit() {
+  const username = document.getElementById('crud-user-username')?.value?.trim();
+  const nama = document.getElementById('crud-user-nama')?.value?.trim();
+  const password = document.getElementById('crud-user-password')?.value?.trim();
+  const role = document.getElementById('crud-user-role')?.value || 'guru';
+
+  if (!username) return showToast('Username/NIP tidak boleh kosong!', 'warning');
+  if (!nama) return showToast('Nama pengguna tidak boleh kosong!', 'warning');
+
+  const selectedMenus = [];
+  document.querySelectorAll('.user-menu-chk:checked').forEach(chk => {
+    selectedMenus.push(chk.value);
+  });
+
+  const existingIdx = (AppState.users || []).findIndex(it => it.username === username);
+  if (existingIdx >= 0) {
+    const existing = AppState.users[existingIdx];
+    existing.nama = nama;
+    existing.role = role;
+    existing.menu_access = selectedMenus;
+    if (password) existing.password_hash = password;
+  } else {
+    AppState.users.push({
+      username: username,
+      nama: nama,
+      password_hash: password || '123456',
+      role: role,
+      menu_access: selectedMenus,
+      status: 'Aktif'
+    });
+  }
+
+  saveToLocalStorage();
+  closeUserModal();
+  renderUsersView();
+  showToast(`Pengguna ${username} berhasil disimpan!`, 'success');
+
+  const res = await apiPost('saveUsers', { users: AppState.users });
+  if (res && res.success) {
+    showToast('Sinkronisasi user ke Google Sheets berhasil!', 'success');
+  }
+}
+
+async function deleteUser(username) {
+  if (username === AppState.currentUser.username) {
+    return showToast('Anda tidak dapat menghapus akun Anda sendiri!', 'error');
+  }
+  if (!confirm(`Hapus pengguna ${username}?`)) return;
+
+  AppState.users = (AppState.users || []).filter(u => u.username !== username);
+  saveToLocalStorage();
+  renderUsersView();
+  showToast(`Pengguna ${username} dihapus`, 'info');
+
+  apiPost('saveUsers', { users: AppState.users });
+}
+
+// ============================================================================
+// REVISI 4: PENGATURAN WAKTU & JP (HARIAN & PER KELAS)
+// ============================================================================
+function renderTimeConfigView() {
+  const daysContainer = document.getElementById('time-days-config-container');
+  const classLimitsTbody = document.getElementById('class-time-limits-tbody');
+
+  const days = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+  const masterWaktu = AppState.master.waktu || [];
+
+  if (daysContainer) {
+    daysContainer.innerHTML = days.map(d => {
+      const daySlots = masterWaktu.filter(w => w.hari === d && !w.is_break);
+      const jpCount = daySlots.length || (d === 'Jumat' ? 5 : d === 'Sabtu' ? 6 : 7);
+      const firstSlot = daySlots[0] || { jam_mulai: '07:00' };
+      const lastSlot = daySlots[daySlots.length - 1] || { jam_selesai: '12:00' };
+
+      return `
+        <div class="p-3.5 bg-slate-50 border border-border-subtle rounded-xl flex items-center justify-between gap-3 flex-wrap">
+          <div class="w-24">
+            <span class="font-extrabold text-sm text-text-primary">${d}</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <div>
+              <span class="text-[10px] text-text-secondary block">Jam Mulai</span>
+              <input type="time" id="time-start-${d}" value="${firstSlot.jam_mulai || '07:00'}" class="text-xs border rounded-lg p-1.5 bg-white font-bold">
+            </div>
+            <span>-</span>
+            <div>
+              <span class="text-[10px] text-text-secondary block">Jam Selesai</span>
+              <input type="time" id="time-end-${d}" value="${lastSlot.jam_selesai || '12:00'}" class="text-xs border rounded-lg p-1.5 bg-white font-bold">
+            </div>
+          </div>
+          <div>
+            <span class="text-[10px] text-text-secondary block">Jumlah JP</span>
+            <input type="number" id="time-jp-${d}" value="${jpCount}" min="1" max="10" class="w-16 text-xs border rounded-lg p-1.5 bg-white font-bold text-center">
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  if (classLimitsTbody) {
+    const classes = AppState.master.kelas || [];
+    const classLimits = AppState.timeConfig.classLimits || [];
+    const limitMap = {};
+    classLimits.forEach(l => { limitMap[l.kelas_id] = l; });
+
+    classLimitsTbody.innerHTML = classes.map(k => {
+      const saved = limitMap[k.id] || {};
+      const maxJp = saved.max_jp_hari || (k.tingkat <= 2 ? 6 : 7);
+      const targetJp = saved.total_jp_minggu || (k.tingkat <= 2 ? 30 : 36);
+
+      return `
+        <tr class="hover:bg-slate-50">
+          <td class="p-2.5 font-bold text-primary">${k.kode_kelas}</td>
+          <td class="p-2.5 font-semibold text-text-secondary">Kelas ${k.tingkat}</td>
+          <td class="p-2.5">
+            <input type="number" id="limit-max-${k.id}" value="${maxJp}" min="4" max="9" class="w-16 border rounded p-1 text-center font-bold bg-slate-50">
+          </td>
+          <td class="p-2.5">
+            <input type="number" id="limit-target-${k.id}" value="${targetJp}" min="20" max="45" class="w-16 border rounded p-1 text-center font-bold bg-slate-50">
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+}
+
+async function saveTimeConfiguration() {
+  const days = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+  const dailyConfig = {};
+  days.forEach(d => {
+    dailyConfig[d] = {
+      jam_mulai: document.getElementById(`time-start-${d}`)?.value || '07:00',
+      jam_selesai: document.getElementById(`time-end-${d}`)?.value || '12:00',
+      jumlah_jp: parseInt(document.getElementById(`time-jp-${d}`)?.value) || 7
+    };
+  });
+
+  const classLimits = (AppState.master.kelas || []).map(k => ({
+    kelas_id: k.id,
+    tingkat: k.tingkat,
+    max_jp_hari: parseInt(document.getElementById(`limit-max-${k.id}`)?.value) || 7,
+    total_jp_minggu: parseInt(document.getElementById(`limit-target-${k.id}`)?.value) || 36
+  }));
+
+  AppState.timeConfig = { dailyConfig, classLimits };
+  saveToLocalStorage();
+  showToast('Pengaturan waktu dan batas JP disimpan ke memori', 'info');
+
+  const res = await apiPost('saveTimeConfig', { dailyConfig, classLimits });
+  if (res && res.success) {
+    showToast('Konfigurasi waktu berhasil disinkronkan ke Sheets!', 'success');
+  }
+}
+
+// ============================================================================
+// REVISI 5: BEBAN MENGAJAR & CONSTRAINT-SATISFACTION AUTO-GENERATOR
+// ============================================================================
+function renderBebanView() {
+  const tbody = document.getElementById('teaching-assignments-tbody');
+  const countBadge = document.getElementById('assignment-count-badge');
+  const statAssignments = document.getElementById('stat-total-assignments');
+  const statJpDemand = document.getElementById('stat-total-jp-demand');
+
+  const assignments = AppState.beban || [];
+  const guruMap = {}; (AppState.master.guru || []).forEach(g => { guruMap[g.id] = g.nama; });
+  const mapelMap = {}; (AppState.master.mapel || []).forEach(m => { mapelMap[m.id] = m.nama; });
+  const kelasMap = {}; (AppState.master.kelas || []).forEach(k => { kelasMap[k.id] = k.kode_kelas; });
+
+  let totalJp = 0;
+  assignments.forEach(a => {
+    const kList = Array.isArray(a.kelas_ids) ? a.kelas_ids : String(a.kelas_ids || '').split(',').filter(Boolean);
+    totalJp += (parseInt(a.jp_per_minggu) || 0) * kList.length;
+  });
+
+  if (countBadge) countBadge.textContent = `${assignments.length} Alokasi Tugas`;
+  if (statAssignments) statAssignments.textContent = assignments.length;
+  if (statJpDemand) statJpDemand.textContent = `${totalJp} JP`;
+
+  if (!tbody) return;
+  if (assignments.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="p-6 text-center text-slate-500">Belum ada alokasi beban mengajar. Klik <strong>Tambah Beban Mengajar</strong> untuk mulai.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = assignments.map(a => {
+    const kList = Array.isArray(a.kelas_ids) ? a.kelas_ids : String(a.kelas_ids || '').split(',').filter(Boolean);
+    const kelasPills = kList.map(kid => `<span class="px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-bold text-[10px] mr-1">${kelasMap[kid] || kid}</span>`).join('');
+    const totalRowJp = (parseInt(a.jp_per_minggu) || 0) * kList.length;
+
+    return `
+      <tr class="hover:bg-slate-50 transition-colors">
+        <td class="p-3 font-bold text-text-primary">${guruMap[a.guru_id] || a.guru_id}</td>
+        <td class="p-3 font-medium text-text-primary">${mapelMap[a.mapel_id] || a.mapel_id}</td>
+        <td class="p-3">${kelasPills}</td>
+        <td class="p-3 text-center font-bold text-text-primary">${a.jp_per_minggu} JP</td>
+        <td class="p-3 text-center font-extrabold text-primary">${totalRowJp} JP</td>
+        <td class="p-3 text-text-secondary text-[11px]">${a.keterangan || '-'}</td>
+        <td class="p-3 text-right">
+          <button type="button" onclick="deleteAssignmentItem('${a.id}')" class="p-1 rounded text-text-secondary hover:text-rose-600 hover:bg-slate-100 cursor-pointer" title="Hapus Alokasi">
+            <span class="material-symbols-outlined text-[18px]">delete</span>
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function openAddAssignmentModal(id = null) {
+  const modal = document.getElementById('modal-assignment-crud');
+  const guruSel = document.getElementById('assign-select-guru');
+  const mapelSel = document.getElementById('assign-select-mapel');
+  const kelasContainer = document.getElementById('assign-kelas-checkboxes');
+
+  if (guruSel) {
+    guruSel.innerHTML = (AppState.master.guru || []).map(g => `<option value="${g.id}">${g.nama} (${g.mapel_utama})</option>`).join('');
+  }
+  if (mapelSel) {
+    mapelSel.innerHTML = (AppState.master.mapel || []).map(m => `<option value="${m.id}">${m.nama} (${m.kode})</option>`).join('');
+  }
+  if (kelasContainer) {
+    kelasContainer.innerHTML = (AppState.master.kelas || []).map(k => `
+      <label class="flex items-center gap-1.5 p-1 rounded hover:bg-white cursor-pointer">
+        <input type="checkbox" value="${k.id}" class="assign-kelas-chk" onchange="updateAssignmentTotalPreview()">
+        <span class="font-bold text-text-primary">${k.kode_kelas}</span>
+      </label>
+    `).join('');
+  }
+
+  updateAssignmentTotalPreview();
+
+  if (modal) {
+    modal.style.display = 'flex';
+    modal.classList.remove('hidden');
+  }
+}
+
+function closeAssignmentModal() {
+  const modal = document.getElementById('modal-assignment-crud');
+  if (modal) {
+    modal.style.display = 'none';
+    modal.classList.add('hidden');
+  }
+}
+
+function updateAssignmentTotalPreview() {
+  const chks = document.querySelectorAll('.assign-kelas-chk:checked');
+  const jp = parseInt(document.getElementById('assign-jp-per-class')?.value) || 4;
+  const preview = document.getElementById('assign-total-preview');
+  if (preview) {
+    preview.textContent = `${chks.length * jp} JP / Minggu (${chks.length} Kelas)`;
+  }
+}
+
+async function saveAssignmentItem() {
+  const guruId = document.getElementById('assign-select-guru')?.value;
+  const mapelId = document.getElementById('assign-select-mapel')?.value;
+  const jp = parseInt(document.getElementById('assign-jp-per-class')?.value) || 4;
+  const ket = document.getElementById('assign-keterangan')?.value?.trim() || '';
+
+  const selectedClasses = [];
+  document.querySelectorAll('.assign-kelas-chk:checked').forEach(chk => {
+    selectedClasses.push(chk.value);
+  });
+
+  if (selectedClasses.length === 0) {
+    return showToast('Pilih minimal satu rombel / kelas!', 'warning');
+  }
+
+  const newAssignment = {
+    id: `BM_${Date.now()}`,
+    guru_id: guruId,
+    mapel_id: mapelId,
+    kelas_ids: selectedClasses,
+    jp_per_minggu: jp,
+    keterangan: ket
+  };
+
+  AppState.beban.push(newAssignment);
+  saveToLocalStorage();
+  closeAssignmentModal();
+  renderBebanView();
+  showToast('Alokasi beban mengajar berhasil ditambahkan!', 'success');
+
+  apiPost('saveTeachingAssignments', { assignments: AppState.beban });
+}
+
+async function deleteAssignmentItem(id) {
+  if (!confirm('Hapus alokasi beban mengajar ini?')) return;
+  AppState.beban = (AppState.beban || []).filter(a => a.id !== id);
+  saveToLocalStorage();
+  renderBebanView();
+  showToast('Alokasi dihapus', 'info');
+
+  apiPost('saveTeachingAssignments', { assignments: AppState.beban });
+}
+
+// ----------------------------------------------------------------------------
+// ALGORITMA CONSTRAINT-SATISFACTION AUTO-SCHEDULE GENERATOR
+// ----------------------------------------------------------------------------
+function runAutoScheduleGenerator() {
+  const assignments = AppState.beban || [];
+  if (assignments.length === 0) {
+    return showToast('Tambahkan beban mengajar guru terlebih dahulu sebelum generate!', 'warning');
+  }
+
+  showToast('Menjalankan algoritma auto-generate jadwal anti bentrok...', 'info');
+
+  const days = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+  const masterWaktu = AppState.master.waktu || [];
+  const requests = AppState.requests || [];
+
+  // Hitung slot KBM valid per hari
+  const validSlotsByDay = {};
+  days.forEach(d => {
+    validSlotsByDay[d] = masterWaktu
+      .filter(w => w.hari === d && !w.is_break && parseInt(w.jp) > 0)
+      .map(w => parseInt(w.jp));
+    if (validSlotsByDay[d].length === 0) {
+      const defaultJp = d === 'Jumat' ? 5 : d === 'Sabtu' ? 6 : 7;
+      validSlotsByDay[d] = Array.from({ length: defaultJp }, (_, i) => i + 1);
+    }
+  });
+
+  // Ketersediaan Guru Map (Blocked slots)
+  const teacherBlockedMap = {};
+  requests.forEach(r => {
+    if (r.status === 'Disetujui' || !r.status) {
+      const key = `${r.guru_id}_${r.hari}_${r.jp}`;
+      teacherBlockedMap[key] = true;
+    }
+  });
+
+  // Buat daftar Task: pecah setiap assignment menjadi blok KBM (prioritaskan 2 JP)
+  const tasks = [];
+  assignments.forEach(a => {
+    const kList = Array.isArray(a.kelas_ids) ? a.kelas_ids : String(a.kelas_ids || '').split(',').filter(Boolean);
+    kList.forEach(kId => {
+      let remainingJp = parseInt(a.jp_per_minggu) || 2;
+      while (remainingJp > 0) {
+        const blockSize = (remainingJp >= 2 && remainingJp !== 3) ? 2 : (remainingJp === 3 ? 3 : 1);
+        tasks.push({
+          assignmentId: a.id,
+          guruId: a.guru_id,
+          mapelId: a.mapel_id,
+          kelasId: kId,
+          blockSize: blockSize
+        });
+        remainingJp -= blockSize;
+      }
+    });
+  });
+
+  // Urutkan task: guru dengan blok terbanyak atau paling terkendala diletakkan duluan
+  tasks.sort((a, b) => b.blockSize - a.blockSize);
+
+  // State Pelacakan Slot
+  const occupiedTeacher = {}; // `${hari}_${jp}_${guruId}` -> true
+  const occupiedClass = {};   // `${hari}_${jp}_${kelasId}` -> true
+  const classDayJpCount = {}; // `${hari}_${kelasId}` -> count
+  const generatedSchedule = [];
+  const unplacedTasks = [];
+
+  tasks.forEach(task => {
+    let placed = false;
+
+    // Cari hari dan JP terbaik yang memuat blockSize berturutan
+    for (const day of days) {
+      if (placed) break;
+      const slots = validSlotsByDay[day];
+      const classDayKey = `${day}_${task.kelasId}`;
+      const currentDayJp = classDayJpCount[classDayKey] || 0;
+
+      // Batas JP per hari (maks 7 atau 8)
+      if (currentDayJp + task.blockSize > 8) continue;
+
+      for (let i = 0; i <= slots.length - task.blockSize; i++) {
+        const blockJps = slots.slice(i, i + task.blockSize);
+
+        // Periksa apakah seluruh JP dalam blok ini aman
+        const isBlockValid = blockJps.every(jp => {
+          const tKey = `${day}_${jp}_${task.guruId}`;
+          const cKey = `${day}_${jp}_${task.kelasId}`;
+          const isBlocked = teacherBlockedMap[tKey];
+          return !isBlocked && !occupiedTeacher[tKey] && !occupiedClass[cKey];
+        });
+
+        if (isBlockValid) {
+          // Tempatkan KBM
+          blockJps.forEach(jp => {
+            const tKey = `${day}_${jp}_${task.guruId}`;
+            const cKey = `${day}_${jp}_${task.kelasId}`;
+            occupiedTeacher[tKey] = true;
+            occupiedClass[cKey] = true;
+
+            generatedSchedule.push({
+              id: `GEN_${task.kelasId}_${day}_${jp}`,
+              hari: day,
+              jp: jp,
+              kelas_id: task.kelasId,
+              guru_id: task.guruId,
+              mapel_id: task.mapelId,
+              ruang_id: `R_${task.kelasId}`
+            });
+          });
+
+          classDayJpCount[classDayKey] = currentDayJp + task.blockSize;
+          placed = true;
+          break;
+        }
+      }
+    }
+
+    if (!placed) {
+      unplacedTasks.push(task);
+    }
+  });
+
+  AppState._generatedScheduleTemp = generatedSchedule;
+
+  // Tampilkan Modal Hasil Generate & Rekomendasi
+  showGenerateResultModal(tasks.length, generatedSchedule.length, unplacedTasks);
+}
+
+function showGenerateResultModal(totalTasks, placedSlots, unplacedTasks) {
+  const modal = document.getElementById('modal-generate-result');
+  const percentEl = document.getElementById('gen-result-percent');
+  const slotsEl = document.getElementById('gen-result-slots');
+  const unplacedContainer = document.getElementById('gen-unplaced-container');
+  const unplacedList = document.getElementById('gen-unplaced-list');
+  const headerEl = document.getElementById('gen-modal-header');
+
+  const totalDemandJp = placedSlots + unplacedTasks.reduce((sum, t) => sum + t.blockSize, 0);
+  const successPercent = totalDemandJp > 0 ? Math.round((placedSlots / totalDemandJp) * 100) : 100;
+
+  if (percentEl) percentEl.textContent = `${successPercent}%`;
+  if (slotsEl) slotsEl.textContent = `${placedSlots} / ${totalDemandJp} JP`;
+
+  const guruMap = {}; (AppState.master.guru || []).forEach(g => { guruMap[g.id] = g.nama; });
+  const mapelMap = {}; (AppState.master.mapel || []).forEach(m => { mapelMap[m.id] = m.nama; });
+  const kelasMap = {}; (AppState.master.kelas || []).forEach(k => { kelasMap[k.id] = k.kode_kelas; });
+
+  if (unplacedTasks.length > 0) {
+    if (headerEl) headerEl.className = 'bg-amber-600 px-6 py-4 text-white flex items-center justify-between';
+    if (unplacedContainer) unplacedContainer.style.display = 'block';
+    if (unplacedList) {
+      unplacedList.innerHTML = unplacedTasks.map(t => `
+        <div class="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-900 text-xs">
+          <strong>${guruMap[t.guruId] || t.guruId}</strong> - ${mapelMap[t.mapelId] || t.mapelId} (${kelasMap[t.kelasId] || t.kelasId}) @ ${t.blockSize} JP
+          <div class="text-[11px] text-text-secondary mt-0.5">Rekomendasi: Tambah kesediaan hari guru pengampu atau sesuaikan batas JP harian rombel.</div>
+        </div>
+      `).join('');
+    }
+  } else {
+    if (headerEl) headerEl.className = 'bg-emerald-600 px-6 py-4 text-white flex items-center justify-between';
+    if (unplacedContainer) unplacedContainer.style.display = 'none';
+  }
+
+  if (modal) {
+    modal.style.display = 'flex';
+    modal.classList.remove('hidden');
+  }
+}
+
+function closeGenerateResultModal() {
+  const modal = document.getElementById('modal-generate-result');
+  if (modal) {
+    modal.style.display = 'none';
+    modal.classList.add('hidden');
+  }
+}
+
+function applyGeneratedScheduleToMatrix() {
+  if (!AppState._generatedScheduleTemp || AppState._generatedScheduleTemp.length === 0) {
+    return showToast('Belum ada jadwal yang di-generate!', 'warning');
+  }
+
+  AppState.jadwal = AppState._generatedScheduleTemp;
+  saveToLocalStorage();
+  calculateClashes();
+  closeGenerateResultModal();
+  navigateView('matrix');
+  renderMatrixTable();
+  showToast('Jadwal hasil generator otomatis berhasil diterapkan ke Matriks KBM!', 'success');
 }
 
 // ============================================================================
@@ -1826,6 +2816,13 @@ async function fetchServerData() {
     if (data.jadwal && data.jadwal.length > 0) AppState.jadwal = data.jadwal;
     if (data.request && data.request.length > 0) AppState.requests = data.request;
     if (data.log && data.log.length > 0) AppState.auditTrail = data.log;
+    if (data.user && data.user.length > 0) AppState.users = data.user;
+    if (data.beban && data.beban.length > 0) AppState.beban = data.beban;
+    if (data.waktu_kelas && data.waktu_kelas.length > 0) AppState.timeConfig.classLimits = data.waktu_kelas;
+    if (data.sekolah && data.sekolah.length > 0) {
+      AppState.master.sekolah = data.sekolah;
+      loadSchoolIdentity();
+    }
 
     saveToLocalStorage();
     populateLoginTeacherDropdown();
@@ -1847,6 +2844,10 @@ function saveToLocalStorage() {
     jadwal: AppState.jadwal,
     requests: AppState.requests,
     auditTrail: AppState.auditTrail,
+    users: AppState.users,
+    beban: AppState.beban,
+    timeConfig: AppState.timeConfig,
+    schoolLogoBase64: AppState.schoolLogoBase64,
     savedAt: Date.now()
   }));
 }
@@ -1861,11 +2862,90 @@ function loadFromLocalStorage() {
         AppState.jadwal = parsed.jadwal || [];
         AppState.requests = parsed.requests || [];
         AppState.auditTrail = parsed.auditTrail || [];
+        AppState.users = parsed.users || [];
+        AppState.beban = parsed.beban || [];
+        AppState.timeConfig = parsed.timeConfig || { days: {}, classLimits: [] };
+        AppState.schoolLogoBase64 = parsed.schoolLogoBase64 || null;
+        if (AppState.users.length === 0) seedDefaultUsersAndBeban();
         return;
       }
     } catch (e) {}
   }
   seedDefaultLocalState();
+}
+
+function seedDefaultUsersAndBeban() {
+  AppState.users = [
+    {
+      username: '19791104 200501 1 003',
+      nama: 'Bambang Sugiantoro, S.Pd.SD',
+      password_hash: '123456',
+      role: 'admin',
+      menu_access: ['dashboard', 'beban', 'matrix', 'availability', 'timeconfig', 'master', 'export', 'school', 'users'],
+      status: 'Aktif'
+    },
+    {
+      username: '19740512 199803 2 004',
+      nama: 'Dra. Sri Mulyani, M.Pd',
+      password_hash: '123456',
+      role: 'kepsek',
+      menu_access: ['dashboard', 'matrix', 'export', 'school'],
+      status: 'Aktif'
+    },
+    {
+      username: '19820315 200604 1 008',
+      nama: 'Ahmad Fauzi, S.Pd.SD',
+      password_hash: '123456',
+      role: 'guru',
+      menu_access: ['matrix', 'availability'],
+      status: 'Aktif'
+    }
+  ];
+
+  AppState.beban = [
+    {
+      id: 'BM_01',
+      guru_id: 'G02', // Ahmad Fauzi
+      mapel_id: 'M05', // Matematika
+      kelas_ids: ['K07', 'K08'], // 4A, 4B
+      jp_per_minggu: 4,
+      keterangan: 'Matematika Fase B'
+    },
+    {
+      id: 'BM_02',
+      guru_id: 'G02', // Ahmad Fauzi
+      mapel_id: 'M06', // IPAS
+      kelas_ids: ['K09', 'K10'], // 5A, 5B
+      jp_per_minggu: 2,
+      keterangan: 'IPAS Terapan Fase C'
+    },
+    {
+      id: 'BM_03',
+      guru_id: 'G14', // Joko Widodo
+      mapel_id: 'M01', // PAI
+      kelas_ids: ['K01', 'K02', 'K07', 'K08'],
+      jp_per_minggu: 3,
+      keterangan: 'PAI & Budi Pekerti'
+    },
+    {
+      id: 'BM_04',
+      guru_id: 'G16', // Budi Santoso
+      mapel_id: 'M07', // PJOK
+      kelas_ids: ['K07', 'K08', 'K09', 'K10'],
+      jp_per_minggu: 3,
+      keterangan: 'PJOK Lapangan'
+    }
+  ];
+
+  AppState.timeConfig = {
+    days: {},
+    classLimits: (AppState.master.kelas || []).map(k => ({
+      kelas_id: k.id,
+      tingkat: k.tingkat,
+      max_jp_hari: k.tingkat <= 2 ? 6 : 7,
+      total_jp_minggu: k.tingkat <= 2 ? 30 : 36
+    }))
+  };
 }
 
 function seedDefaultLocalState() {
@@ -2158,6 +3238,45 @@ function registerGlobalHandlers() {
   window.handleGlobalSearch = handleGlobalSearch;
   window.showToast = showToast;
   window.triggerPWAInstall = triggerPWAInstall;
+
+  // Revisi 1: Identitas Sekolah & Logo
+  window.renderSchoolView = renderSchoolView;
+  window.loadSchoolIdentity = loadSchoolIdentity;
+  window.handleSchoolLogoUpload = handleSchoolLogoUpload;
+  window.saveSchoolIdentityForm = saveSchoolIdentityForm;
+
+  // Revisi 2: Pengaturan User (RBAC)
+  window.renderUsersView = renderUsersView;
+  window.openAddUserModal = openAddUserModal;
+  window.closeUserModal = closeUserModal;
+  window.autoSelectMenuCheckboxesByRole = autoSelectMenuCheckboxesByRole;
+  window.saveUserSubmit = saveUserSubmit;
+  window.deleteUser = deleteUser;
+
+  // Revisi 3: Import, Template & Bulk Delete Master
+  window.toggleSelectAllMaster = toggleSelectAllMaster;
+  window.toggleMasterItemSelection = toggleMasterItemSelection;
+  window.deleteSelectedMasterItems = deleteSelectedMasterItems;
+  window.downloadMasterTemplate = downloadMasterTemplate;
+  window.handleMasterFileSelect = handleMasterFileSelect;
+  window.openImportPreviewModal = openImportPreviewModal;
+  window.closeImportPreviewModal = closeImportPreviewModal;
+  window.confirmImportData = confirmImportData;
+
+  // Revisi 4: Pengaturan Waktu & JP
+  window.renderTimeConfigView = renderTimeConfigView;
+  window.saveTimeConfiguration = saveTimeConfiguration;
+
+  // Revisi 5: Beban Mengajar & Auto-Generator
+  window.renderBebanView = renderBebanView;
+  window.openAddAssignmentModal = openAddAssignmentModal;
+  window.closeAssignmentModal = closeAssignmentModal;
+  window.updateAssignmentTotalPreview = updateAssignmentTotalPreview;
+  window.saveAssignmentItem = saveAssignmentItem;
+  window.deleteAssignmentItem = deleteAssignmentItem;
+  window.runAutoScheduleGenerator = runAutoScheduleGenerator;
+  window.closeGenerateResultModal = closeGenerateResultModal;
+  window.applyGeneratedScheduleToMatrix = applyGeneratedScheduleToMatrix;
 }
 
 registerGlobalHandlers();
