@@ -16,37 +16,103 @@
  */
 
 // ============================================================================
-// 1. SAFE STORAGE WRAPPER (Anti-error di iframe/private mode)
+// 1. SAFE STORAGE WRAPPER (Multi-Storage: LocalStorage, SessionStorage, Cookie)
 // ============================================================================
 const SafeStorage = {
   _mem: {},
   get: function(key) {
     try {
-      if (typeof window !== 'undefined' && 'localStorage' in window && window.localStorage) {
-        return window.localStorage.getItem(key);
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const val = window.localStorage.getItem(key);
+        if (val !== null && val !== undefined) return val;
+      }
+    } catch (e) {}
+    try {
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        const val = window.sessionStorage.getItem(key);
+        if (val !== null && val !== undefined) return val;
+      }
+    } catch (e) {}
+    try {
+      if (typeof document !== 'undefined' && document.cookie) {
+        const match = document.cookie.match(new RegExp('(^| )' + key + '=([^;]+)'));
+        if (match) return decodeURIComponent(match[2]);
       }
     } catch (e) {}
     return SafeStorage._mem[key] || null;
   },
   set: function(key, val) {
+    SafeStorage._mem[key] = val;
     try {
-      if (typeof window !== 'undefined' && 'localStorage' in window && window.localStorage) {
+      if (typeof window !== 'undefined' && window.localStorage) {
         window.localStorage.setItem(key, val);
-        return;
       }
     } catch (e) {}
-    SafeStorage._mem[key] = val;
+    try {
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        window.sessionStorage.setItem(key, val);
+      }
+    } catch (e) {}
+    try {
+      if (typeof document !== 'undefined') {
+        document.cookie = `${key}=${encodeURIComponent(val)};path=/;max-age=${7 * 86400};SameSite=Lax`;
+      }
+    } catch (e) {}
   },
   remove: function(key) {
+    delete SafeStorage._mem[key];
     try {
-      if (typeof window !== 'undefined' && 'localStorage' in window && window.localStorage) {
+      if (typeof window !== 'undefined' && window.localStorage) {
         window.localStorage.removeItem(key);
-        return;
       }
     } catch (e) {}
-    delete SafeStorage._mem[key];
+    try {
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        window.sessionStorage.removeItem(key);
+      }
+    } catch (e) {}
+    try {
+      if (typeof document !== 'undefined') {
+        document.cookie = `${key}=;path=/;max-age=0`;
+      }
+    } catch (e) {}
   }
 };
+
+// ============================================================================
+// 1.1 INACTIVITY TRACKER & REFRESH-PROOF ENGINE (10 Menit Auto-Logout)
+// ============================================================================
+const INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000; // 10 Menit tidak ada aktivitas
+let _inactivityTimer = null;
+
+function recordUserActivity() {
+  if (!AppState.isLoggedIn) return;
+  const now = Date.now();
+  SafeStorage.set('SIJAANTI_LAST_ACTIVE', String(now));
+  resetInactivityTimer();
+}
+
+function resetInactivityTimer() {
+  if (_inactivityTimer) clearTimeout(_inactivityTimer);
+  _inactivityTimer = setTimeout(() => {
+    if (AppState.isLoggedIn) {
+      console.warn('⚠️ Sesi berakhir otomatis karena tidak ada aktivitas selama 10 menit.');
+      logoutUser(true);
+    }
+  }, INACTIVITY_TIMEOUT_MS);
+}
+
+function initActivityListeners() {
+  ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'].forEach(evt => {
+    window.addEventListener(evt, () => {
+      const last = parseInt(SafeStorage.get('SIJAANTI_LAST_ACTIVE') || '0', 10);
+      if (Date.now() - last > 5000) {
+        recordUserActivity();
+      }
+    }, { passive: true });
+  });
+  resetInactivityTimer();
+}
 
 // ============================================================================
 // 2. STATE STORE GLOBAL
@@ -239,7 +305,8 @@ function bootApplication() {
   if (AppState.isLoggedIn) {
     showAppLayout();
     setupRoleUI();
-    renderCurrentView();
+    initActivityListeners();
+    navigateView(AppState.activeView || 'dashboard');
   } else {
     showLoginLayout();
   }
@@ -251,13 +318,29 @@ function bootApplication() {
 function checkAuthSession() {
   const sessionRaw = SafeStorage.get(APP_CONFIG.STORAGE_KEY_AUTH);
   const token = SafeStorage.get(APP_CONFIG.STORAGE_KEY_AUTH + '_TOKEN');
+  const lastActive = parseInt(SafeStorage.get('SIJAANTI_LAST_ACTIVE') || '0', 10);
+  const now = Date.now();
+
   if (sessionRaw) {
     try {
       const sess = JSON.parse(sessionRaw);
       if (sess && sess.isLoggedIn && sess.user) {
+        // Cek apakah tidak aktif selama lebih dari 10 menit
+        const lastTime = lastActive || sess.timestamp || 0;
+        if (lastTime > 0 && (now - lastTime) > INACTIVITY_TIMEOUT_MS) {
+          console.warn('⚠️ Sesi kedaluwarsa setelah 10 menit inaktivitas.');
+          SafeStorage.remove(APP_CONFIG.STORAGE_KEY_AUTH);
+          SafeStorage.remove(APP_CONFIG.STORAGE_KEY_AUTH + '_TOKEN');
+          SafeStorage.remove('SIJAANTI_LAST_ACTIVE');
+          AppState.isLoggedIn = false;
+          return;
+        }
+
         AppState.isLoggedIn = true;
         AppState.currentUser = sess.user;
         AppState.authToken = token || '';
+        AppState.activeView = sess.activeView || AppState.activeView || 'dashboard';
+        recordUserActivity();
         return;
       }
     } catch (e) {}
@@ -391,36 +474,46 @@ function executeLogin(userObj, token) {
   AppState.isLoggedIn = true;
   AppState.currentUser = userObj;
   AppState.authToken = token || '';
+  const initialView = userObj.role === 'guru' ? 'matrix' : 'dashboard';
+  AppState.activeView = initialView;
 
-  SafeStorage.set(APP_CONFIG.STORAGE_KEY_AUTH, JSON.stringify({ isLoggedIn: true, user: userObj, timestamp: Date.now() }));
+  SafeStorage.set(APP_CONFIG.STORAGE_KEY_AUTH, JSON.stringify({
+    isLoggedIn: true,
+    user: userObj,
+    timestamp: Date.now(),
+    activeView: initialView
+  }));
   if (token) SafeStorage.set(APP_CONFIG.STORAGE_KEY_AUTH + '_TOKEN', token);
+  SafeStorage.set('SIJAANTI_LAST_ACTIVE', String(Date.now()));
 
   // Pastikan data yang tersimpan di localStorage termuat sempurna
   loadFromLocalStorage();
 
   showAppLayout();
   setupRoleUI();
+  initActivityListeners();
 
-  if (userObj.role === 'guru') {
-    navigateView('matrix');
-  } else {
-    navigateView('dashboard');
-  }
-
+  navigateView(initialView);
   showToast(`Selamat datang, ${userObj.name}`, 'success');
 
   // Sinkronkan data terbaru dari server di latar belakang
   fetchServerData();
 }
 
-function logoutUser() {
+function logoutUser(isAuto = false) {
   saveToLocalStorage(); // Amankan seluruh perubahan data sebelum logout
+  if (_inactivityTimer) clearTimeout(_inactivityTimer);
   AppState.isLoggedIn = false;
   AppState.authToken = '';
   SafeStorage.remove(APP_CONFIG.STORAGE_KEY_AUTH);
   SafeStorage.remove(APP_CONFIG.STORAGE_KEY_AUTH + '_TOKEN');
+  SafeStorage.remove('SIJAANTI_LAST_ACTIVE');
   showLoginLayout();
-  showToast('Anda telah keluar dari sesi SiJaAnti.', 'info');
+  if (isAuto) {
+    showToast('Sesi Anda berakhir karena tidak ada aktivitas selama 10 menit.', 'warning');
+  } else {
+    showToast('Anda telah keluar dari sesi SiJaAnti.', 'info');
+  }
 }
 
 // ============================================================================
@@ -433,6 +526,17 @@ function navigateView(viewName) {
   }
 
   AppState.activeView = viewName;
+
+  // Simpan view aktif ke sesi agar saat direfresh tetap di halaman ini
+  const sessionRaw = SafeStorage.get(APP_CONFIG.STORAGE_KEY_AUTH);
+  if (sessionRaw) {
+    try {
+      const sess = JSON.parse(sessionRaw);
+      sess.activeView = viewName;
+      SafeStorage.set(APP_CONFIG.STORAGE_KEY_AUTH, JSON.stringify(sess));
+    } catch (e) {}
+  }
+
   showAppLayout();
 
   const views = ['dashboard', 'beban', 'matrix', 'availability', 'timeconfig', 'master', 'school', 'users', 'export'];
@@ -915,16 +1019,22 @@ function renderMatrixView() {
 
 function populateMatrixSelectors() {
   const classSel = document.getElementById('matrix-class-select');
-  if (classSel && classSel.options.length <= 1) {
+  if (classSel) {
+    if (!AppState.selectedClassId && AppState.master.kelas?.length > 0) {
+      AppState.selectedClassId = AppState.master.kelas[0].id;
+    }
     classSel.innerHTML = (AppState.master.kelas || []).map(k => `
-      <option value="${k.id}" ${k.id === AppState.selectedClassId ? 'selected' : ''}>${k.nama_rombel}</option>
+      <option value="${k.id}" ${k.id === AppState.selectedClassId ? 'selected' : ''}>${k.nama_rombel || k.kode_kelas}</option>
     `).join('');
   }
 
   const teacherSel = document.getElementById('matrix-teacher-select');
-  if (teacherSel && teacherSel.options.length <= 1) {
+  if (teacherSel) {
+    if (!AppState.selectedTeacherId && AppState.master.guru?.length > 0) {
+      AppState.selectedTeacherId = AppState.master.guru[0].id;
+    }
     teacherSel.innerHTML = (AppState.master.guru || []).map(g => `
-      <option value="${g.id}" ${g.id === AppState.selectedTeacherId ? 'selected' : ''}>${g.nama} (${g.mapel_utama})</option>
+      <option value="${g.id}" ${g.id === AppState.selectedTeacherId ? 'selected' : ''}>${g.nama} (${g.mapel_utama || 'Guru'})</option>
     `).join('');
   }
 }
@@ -971,11 +1081,13 @@ function renderMatrixTable() {
     }
     
     // Header Kolom: Tepat sebanyak jumlah kelas yang ada di Master Kelas (tidak ada kolom sisa)
-    let thHtml = `<tr><th class="p-3 sticky-time-col border-r border-border-subtle w-36">Waktu & JP</th>`;
+    const colCount = masterKelas.length;
+    const colWidth = colCount > 0 ? Math.max(12, Math.floor(86 / colCount)) : 86;
+    let thHtml = `<tr><th class="p-3 sticky-time-col border-r border-border-subtle" style="width: 14%; min-width: 110px;">Waktu & JP</th>`;
     masterKelas.forEach(k => {
       const hasClash = AppState.clashes.some(c => c.hari === AppState.selectedDay && c.kelasId === k.id);
       thHtml += `
-        <th class="p-3 text-center border-r border-border-subtle min-w-[140px]">
+        <th class="p-3 text-center border-r border-border-subtle" style="width: ${colWidth}%; min-width: 125px;">
           <div class="flex items-center justify-center gap-1">
             <span>${k.nama_rombel || k.kode_kelas}</span>
             ${hasClash ? '<span class="text-rose-500 font-bold" title="Ada bentrok di kelas ini">⚠️</span>' : ''}
@@ -1024,10 +1136,13 @@ function renderMatrixTable() {
 
   } else if (mode === 'single-class') {
     // Mode 1 Kelas Penuh: Kolom hanya hari aktif yang disetting
-    const selectedClass = masterKelas.find(k => k.id === AppState.selectedClassId) || masterKelas[0];
+    const selectedClass = masterKelas.find(k => k.id === AppState.selectedClassId) || masterKelas[0] || { id: '', kode_kelas: '-' };
 
-    let thHtml = `<tr><th class="p-3 sticky-time-col border-r border-border-subtle w-32">Jam Pelajaran</th>`;
-    activeDays.forEach(d => { thHtml += `<th class="p-3 text-center border-r border-border-subtle min-w-[150px]">${d}</th>`; });
+    const dayColWidth = activeDays.length > 0 ? Math.floor(86 / activeDays.length) : 86;
+    let thHtml = `<tr><th class="p-3 sticky-time-col border-r border-border-subtle" style="width: 14%; min-width: 110px;">Jam Pelajaran</th>`;
+    activeDays.forEach(d => { 
+      thHtml += `<th class="p-3 text-center border-r border-border-subtle" style="width: ${dayColWidth}%; min-width: 120px;">${d}</th>`; 
+    });
     thHtml += `</tr>`;
     thead.innerHTML = thHtml;
 
@@ -1041,7 +1156,7 @@ function renderMatrixTable() {
 
     let tbodyHtml = '';
     for (let jp = 1; jp <= maxJp; jp++) {
-      const jpTime = getSlotTime('Senin', jp);
+      const jpTime = getSlotTime(activeDays[0] || 'Senin', jp);
       tbodyHtml += `
         <tr>
           <td class="p-2.5 sticky-time-col border-r border-border-subtle bg-slate-50 font-bold text-text-primary text-center">
@@ -1075,8 +1190,11 @@ function renderMatrixTable() {
     // Mode Guru: Kolom hanya hari aktif yang disetting
     const teacherId = AppState.selectedTeacherId;
 
-    let thHtml = `<tr><th class="p-3 sticky-time-col border-r border-border-subtle w-32">Jam Pelajaran</th>`;
-    activeDays.forEach(d => { thHtml += `<th class="p-3 text-center border-r border-border-subtle min-w-[150px]">${d}</th>`; });
+    const dayColWidth = activeDays.length > 0 ? Math.floor(86 / activeDays.length) : 86;
+    let thHtml = `<tr><th class="p-3 sticky-time-col border-r border-border-subtle" style="width: 14%; min-width: 110px;">Jam Pelajaran</th>`;
+    activeDays.forEach(d => { 
+      thHtml += `<th class="p-3 text-center border-r border-border-subtle" style="width: ${dayColWidth}%; min-width: 120px;">${d}</th>`; 
+    });
     thHtml += `</tr>`;
     thead.innerHTML = thHtml;
 
@@ -1089,7 +1207,7 @@ function renderMatrixTable() {
 
     let tbodyHtml = '';
     for (let jp = 1; jp <= maxJp; jp++) {
-      const jpTime = getSlotTime('Senin', jp);
+      const jpTime = getSlotTime(activeDays[0] || 'Senin', jp);
       tbodyHtml += `
         <tr>
           <td class="p-2.5 sticky-time-col border-r border-border-subtle bg-slate-50 font-bold text-text-primary text-center">
@@ -2880,6 +2998,21 @@ async function saveTimeConfiguration() {
 // ============================================================================
 // REVISI 5: BEBAN MENGAJAR & CONSTRAINT-SATISFACTION AUTO-GENERATOR
 // ============================================================================
+function parseClassIds(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.map(x => String(x).trim()).filter(Boolean);
+  const s = String(raw).trim();
+  if (s.startsWith('[') && s.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(s);
+      if (Array.isArray(parsed)) return parsed.map(x => String(x).trim()).filter(Boolean);
+    } catch (e) {
+      return s.replace(/[\[\]"']/g, '').split(',').map(x => x.trim()).filter(Boolean);
+    }
+  }
+  return s.split(',').map(x => x.trim()).filter(Boolean);
+}
+
 function renderBebanView() {
   const tbody = document.getElementById('teaching-assignments-tbody');
   const countBadge = document.getElementById('assignment-count-badge');
@@ -2889,11 +3022,11 @@ function renderBebanView() {
   const assignments = AppState.beban || [];
   const guruMap = {}; (AppState.master.guru || []).forEach(g => { guruMap[g.id] = g.nama; });
   const mapelMap = {}; (AppState.master.mapel || []).forEach(m => { mapelMap[m.id] = m.nama; });
-  const kelasMap = {}; (AppState.master.kelas || []).forEach(k => { kelasMap[k.id] = k.kode_kelas; });
+  const kelasMap = {}; (AppState.master.kelas || []).forEach(k => { kelasMap[k.id] = k.kode_kelas || k.nama_rombel; });
 
   let totalJp = 0;
   assignments.forEach(a => {
-    const kList = Array.isArray(a.kelas_ids) ? a.kelas_ids : String(a.kelas_ids || '').split(',').filter(Boolean);
+    const kList = parseClassIds(a.kelas_ids);
     totalJp += (parseInt(a.jp_per_minggu) || 0) * kList.length;
   });
 
@@ -2908,7 +3041,7 @@ function renderBebanView() {
   }
 
   tbody.innerHTML = assignments.map(a => {
-    const kList = Array.isArray(a.kelas_ids) ? a.kelas_ids : String(a.kelas_ids || '').split(',').filter(Boolean);
+    const kList = parseClassIds(a.kelas_ids);
     const kelasPills = kList.map(kid => `<span class="px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-bold text-[10px] mr-1">${kelasMap[kid] || kid}</span>`).join('');
     const totalRowJp = (parseInt(a.jp_per_minggu) || 0) * kList.length;
 
@@ -2959,7 +3092,7 @@ function openAddAssignmentModal(id = null) {
   }
 
   const existing = id ? (AppState.beban || []).find(a => a.id === id) : null;
-  const existingClasses = existing ? (Array.isArray(existing.kelas_ids) ? existing.kelas_ids : String(existing.kelas_ids || '').split(',').map(s => s.trim())) : [];
+  const existingClasses = existing ? parseClassIds(existing.kelas_ids) : [];
 
   if (kelasContainer) {
     kelasContainer.innerHTML = (AppState.master.kelas || []).map(k => `
@@ -3068,6 +3201,29 @@ async function deleteAssignmentItem(id) {
 // ----------------------------------------------------------------------------
 // ALGORITMA CONSTRAINT-SATISFACTION AUTO-SCHEDULE GENERATOR
 // ----------------------------------------------------------------------------
+function splitBebanIntoBlocks(jp) {
+  const total = parseInt(jp) || 2;
+  if (total <= 0) return [];
+  if (total === 1) return [1];
+  if (total === 2) return [2];
+  if (total === 3) return [2, 1];
+  if (total === 4) return [2, 2]; // 4 JP disebar 2 JP, 2 JP di hari berbeda
+  if (total === 5) return [3, 2];
+  if (total === 6) return [2, 2, 2];
+  if (total === 7) return [3, 2, 2];
+  if (total === 8) return [2, 2, 2, 2];
+
+  const blocks = [];
+  let rem = total;
+  while (rem > 0) {
+    if (rem >= 4) { blocks.push(2); rem -= 2; }
+    else if (rem === 3) { blocks.push(2); blocks.push(1); rem -= 3; }
+    else if (rem === 2) { blocks.push(2); rem -= 2; }
+    else { blocks.push(1); rem -= 1; }
+  }
+  return blocks;
+}
+
 function runAutoScheduleGenerator() {
   const assignments = AppState.beban || [];
   if (assignments.length === 0) {
@@ -3076,117 +3232,250 @@ function runAutoScheduleGenerator() {
 
   showToast('Menjalankan algoritma auto-generate jadwal anti bentrok...', 'info');
 
-  const days = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+  // Ambil konfigurasi hari aktif dari menu Waktu & Jam Belajar
+  const configuredDays = Object.keys(AppState.timeConfig?.dailyConfig || {}).filter(d => (AppState.timeConfig.dailyConfig[d].jumlah_jp || 0) > 0);
+  const days = configuredDays.length > 0 ? configuredDays : ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+
   const masterWaktu = AppState.master.waktu || [];
   const requests = AppState.requests || [];
 
   // Hitung slot KBM valid per hari
   const validSlotsByDay = {};
   days.forEach(d => {
-    validSlotsByDay[d] = masterWaktu
+    const slots = masterWaktu
       .filter(w => w.hari === d && !w.is_break && parseInt(w.jp) > 0)
-      .map(w => parseInt(w.jp));
-    if (validSlotsByDay[d].length === 0) {
-      const defaultJp = d === 'Jumat' ? 5 : d === 'Sabtu' ? 6 : 7;
-      validSlotsByDay[d] = Array.from({ length: defaultJp }, (_, i) => i + 1);
+      .map(w => parseInt(w.jp))
+      .sort((a, b) => a - b);
+
+    if (slots.length > 0) {
+      validSlotsByDay[d] = slots;
+    } else {
+      const cfg = getDayConfigOrDefault(d);
+      const totalJp = parseInt(cfg.jumlah_jp) || (d === 'Jumat' ? 5 : d === 'Sabtu' ? 6 : 8);
+      validSlotsByDay[d] = Array.from({ length: totalJp }, (_, i) => i + 1);
     }
   });
 
-  // Ketersediaan Guru Map (Blocked slots)
+  // Ketersediaan Guru Map (Blocked slots) - Wajib sinkron dan diperhatikan secara ketat
   const teacherBlockedMap = {};
   requests.forEach(r => {
-    if (r.status === 'Disetujui' || !r.status) {
-      const key = `${r.guru_id}_${r.hari}_${r.jp}`;
-      teacherBlockedMap[key] = true;
+    const status = String(r.status || '').trim().toLowerCase();
+    if (!status || status === 'disetujui' || status === 'berhalangan' || status === 'approved') {
+      const gId = String(r.guru_id || '').trim();
+      const h = String(r.hari || '').trim();
+      const jp = parseInt(r.jp);
+      if (gId && h && !isNaN(jp)) {
+        teacherBlockedMap[`${gId}_${h}_${jp}`] = true;
+      }
     }
   });
 
-  // Buat daftar Task: pecah setiap assignment menjadi blok KBM (prioritaskan 2 JP)
+  // Buat daftar Task: pecah setiap assignment menjadi blok pedagogis (2 JP, 4 JP -> [2, 2])
   const tasks = [];
-  assignments.forEach(a => {
-    const kList = Array.isArray(a.kelas_ids) ? a.kelas_ids : String(a.kelas_ids || '').split(',').filter(Boolean);
+  assignments.forEach((a, aIdx) => {
+    const kList = parseClassIds(a.kelas_ids);
+    const gId = String(a.guru_id || '').trim();
+    const mId = String(a.mapel_id || '').trim();
+    const jpPerRombel = parseInt(a.jp_per_minggu) || 2;
+
     kList.forEach(kId => {
-      let remainingJp = parseInt(a.jp_per_minggu) || 2;
-      while (remainingJp > 0) {
-        const blockSize = (remainingJp >= 2 && remainingJp !== 3) ? 2 : (remainingJp === 3 ? 3 : 1);
+      const blocks = splitBebanIntoBlocks(jpPerRombel);
+      blocks.forEach((blockSize, bIdx) => {
         tasks.push({
+          id: `TASK_${aIdx}_${kId}_${bIdx}`,
           assignmentId: a.id,
-          guruId: a.guru_id,
-          mapelId: a.mapel_id,
+          guruId: gId,
+          mapelId: mId,
           kelasId: kId,
-          blockSize: blockSize
+          blockSize: blockSize,
+          groupKey: `${gId}_${mId}_${kId}` // Digunakan untuk sebaran 2 JP, 2 JP di hari berbeda
         });
-        remainingJp -= blockSize;
-      }
+      });
     });
   });
 
-  // Urutkan task: guru dengan blok terbanyak atau paling terkendala diletakkan duluan
-  tasks.sort((a, b) => b.blockSize - a.blockSize);
+  // Urutkan task: guru paling terkendala (banyak berhalangan) & blok terbesar didahulukan
+  const teacherBlockCount = {};
+  Object.keys(teacherBlockedMap).forEach(k => {
+    const gId = k.split('_')[0];
+    teacherBlockCount[gId] = (teacherBlockCount[gId] || 0) + 1;
+  });
+
+  tasks.sort((a, b) => {
+    if (b.blockSize !== a.blockSize) return b.blockSize - a.blockSize;
+    const blockA = teacherBlockCount[a.guruId] || 0;
+    const blockB = teacherBlockCount[b.guruId] || 0;
+    if (blockB !== blockA) return blockB - blockA;
+    return a.kelasId.localeCompare(b.kelasId);
+  });
 
   // State Pelacakan Slot
-  const occupiedTeacher = {}; // `${hari}_${jp}_${guruId}` -> true
-  const occupiedClass = {};   // `${hari}_${jp}_${kelasId}` -> true
-  const classDayJpCount = {}; // `${hari}_${kelasId}` -> count
+  const occupiedTeacher = {};   // `${day}_${jp}_${guruId}` -> true
+  const occupiedClass = {};     // `${day}_${jp}_${kelasId}` -> true
+  const classDayJpCount = {};   // `${day}_${kelasId}` -> count
+  const groupPlacedDays = {};   // `${groupKey}` -> Set(days)
+  const teacherSlotsByDay = {}; // `${day}_${guruId}` -> [jp, jp]
   const generatedSchedule = [];
   const unplacedTasks = [];
 
-  tasks.forEach(task => {
-    let placed = false;
+  // Helper penempatan task ke jadwal
+  function tryPlaceTask(task, allowSameDay = false) {
+    let bestOption = null;
+    let highestScore = -9999;
 
-    // Cari hari dan JP terbaik yang memuat blockSize berturutan
     for (const day of days) {
-      if (placed) break;
-      const slots = validSlotsByDay[day];
+      // Aturan Sebaran: Jangan letakkan guru+mapel+rombel yang sama di hari yang sama jika belum terpaksa
+      const usedDays = groupPlacedDays[task.groupKey];
+      if (!allowSameDay && usedDays && usedDays.has(day)) {
+        continue;
+      }
+
+      const slots = validSlotsByDay[day] || [];
       const classDayKey = `${day}_${task.kelasId}`;
       const currentDayJp = classDayJpCount[classDayKey] || 0;
+      const dayCfg = getDayConfigOrDefault(day);
+      const maxJpForDay = parseInt(dayCfg.jumlah_jp) || 8;
 
-      // Batas JP per hari (maks 7 atau 8)
-      if (currentDayJp + task.blockSize > 8) continue;
+      if (currentDayJp + task.blockSize > maxJpForDay) continue;
 
       for (let i = 0; i <= slots.length - task.blockSize; i++) {
         const blockJps = slots.slice(i, i + task.blockSize);
 
-        // Periksa apakah seluruh JP dalam blok ini aman
+        // Periksa apakah slot berurutan
+        let isConsecutive = true;
+        for (let c = 0; c < blockJps.length - 1; c++) {
+          if (blockJps[c + 1] !== blockJps[c] + 1) {
+            isConsecutive = false;
+            break;
+          }
+        }
+        if (!isConsecutive) continue;
+
+        // Cek bentrok ketersediaan guru & slot terisi
         const isBlockValid = blockJps.every(jp => {
+          const blockKey = `${task.guruId}_${day}_${jp}`;
           const tKey = `${day}_${jp}_${task.guruId}`;
           const cKey = `${day}_${jp}_${task.kelasId}`;
-          const isBlocked = teacherBlockedMap[tKey];
+          const isBlocked = !!teacherBlockedMap[blockKey];
           return !isBlocked && !occupiedTeacher[tKey] && !occupiedClass[cKey];
         });
 
-        if (isBlockValid) {
-          // Tempatkan KBM
-          blockJps.forEach(jp => {
-            const tKey = `${day}_${jp}_${task.guruId}`;
-            const cKey = `${day}_${jp}_${task.kelasId}`;
-            occupiedTeacher[tKey] = true;
-            occupiedClass[cKey] = true;
+        if (!isBlockValid) continue;
 
-            generatedSchedule.push({
-              id: `GEN_${task.kelasId}_${day}_${jp}`,
-              hari: day,
-              jp: jp,
-              kelas_id: task.kelasId,
-              guru_id: task.guruId,
-              mapel_id: task.mapelId,
-              ruang_id: `R_${task.kelasId}`
-            });
-          });
+        // Hitung Skor Pedagogis:
+        // 1. Kedekatan / Kumpul Jam Guru yang sama (minimalkan jam kosong/idle)
+        let score = 100;
+        const teacherDayKey = `${day}_${task.guruId}`;
+        const existingTeacherJps = teacherSlotsByDay[teacherDayKey] || [];
 
-          classDayJpCount[classDayKey] = currentDayJp + task.blockSize;
-          placed = true;
-          break;
+        if (existingTeacherJps.length > 0) {
+          const firstBlockJp = blockJps[0];
+          const lastBlockJp = blockJps[blockJps.length - 1];
+
+          // Cek apakah langsung bersambung dengan jam mengajar guru sebelumnya di hari yang sama
+          const isImmediatelyAdjacent = existingTeacherJps.some(ejp => ejp === firstBlockJp - 1 || ejp === lastBlockJp + 1);
+          if (isImmediatelyAdjacent) {
+            score += 60; // Sangat disukai: jam guru berkumpul berurutan
+          } else {
+            const minGap = Math.min(...existingTeacherJps.map(ejp => Math.abs(ejp - firstBlockJp)));
+            score -= (minGap * 10); // Penalti untuk jam kosong di tengah
+          }
+        } else {
+          score += 20; // Hari baru bagi guru
+        }
+
+        // 2. Keseimbangan beban harian kelas
+        score += (maxJpForDay - currentDayJp) * 2;
+
+        if (score > highestScore) {
+          highestScore = score;
+          bestOption = { day, blockJps };
         }
       }
     }
 
-    if (!placed) {
+    if (bestOption) {
+      const { day, blockJps } = bestOption;
+      const classDayKey = `${day}_${task.kelasId}`;
+      const teacherDayKey = `${day}_${task.guruId}`;
+
+      blockJps.forEach(jp => {
+        const tKey = `${day}_${jp}_${task.guruId}`;
+        const cKey = `${day}_${jp}_${task.kelasId}`;
+        occupiedTeacher[tKey] = true;
+        occupiedClass[cKey] = true;
+
+        if (!teacherSlotsByDay[teacherDayKey]) teacherSlotsByDay[teacherDayKey] = [];
+        teacherSlotsByDay[teacherDayKey].push(jp);
+
+        generatedSchedule.push({
+          id: `GEN_${task.kelasId}_${day}_${jp}`,
+          hari: day,
+          jp: jp,
+          kelas_id: task.kelasId,
+          guru_id: task.guruId,
+          mapel_id: task.mapelId,
+          ruang_id: `R_${task.kelasId}`
+        });
+      });
+
+      classDayJpCount[classDayKey] = (classDayJpCount[classDayKey] || 0) + task.blockSize;
+
+      if (!groupPlacedDays[task.groupKey]) groupPlacedDays[task.groupKey] = new Set();
+      groupPlacedDays[task.groupKey].add(day);
+
+      return true;
+    }
+
+    return false;
+  }
+
+  // PASS 1: Penempatan Ideal (Ketersediaan Ketat + Sebaran Hari Berbeda + Blok 2 JP)
+  const remainingAfterPass1 = [];
+  tasks.forEach(task => {
+    const placed = tryPlaceTask(task, false);
+    if (!placed) remainingAfterPass1.push(task);
+  });
+
+  // PASS 2: Relaksasi Sebaran Hari (Jika terpaksa karena keterbatasan hari guru/kelas)
+  const remainingAfterPass2 = [];
+  remainingAfterPass1.forEach(task => {
+    const placed = tryPlaceTask(task, true);
+    if (!placed) remainingAfterPass2.push(task);
+  });
+
+  // PASS 3: Relaksasi Blok JP (Jika blok 2 JP tidak muat, pecah jadi 1 JP agar tetap tertampung)
+  remainingAfterPass2.forEach(task => {
+    if (task.blockSize > 1) {
+      let placedCount = 0;
+      for (let p = 0; p < task.blockSize; p++) {
+        const miniTask = { ...task, blockSize: 1, id: `${task.id}_sub_${p}` };
+        if (tryPlaceTask(miniTask, true)) {
+          placedCount++;
+        }
+      }
+      if (placedCount < task.blockSize) {
+        unplacedTasks.push({ ...task, blockSize: task.blockSize - placedCount });
+      }
+    } else {
       unplacedTasks.push(task);
     }
   });
 
+  // SIMPAN DAN TERAPKAN SEGERA KE STATE & LOCAL STORAGE
+  AppState.jadwal = generatedSchedule;
   AppState._generatedScheduleTemp = generatedSchedule;
+  saveToLocalStorage();
+  calculateClashes();
+
+  // Sinkronkan langsung ke Papan Plotting dan Pratinjau
+  renderMatrixTable();
+  if (typeof renderExportView === 'function') {
+    renderExportView();
+  }
+
+  // Kirim data ke backend Google Sheets secara asinkron
+  saveMatrixChangesToServer();
 
   // Tampilkan Modal Hasil Generate & Rekomendasi
   showGenerateResultModal(tasks.length, generatedSchedule.length, unplacedTasks);
@@ -3241,11 +3530,14 @@ function closeGenerateResultModal() {
 }
 
 function applyGeneratedScheduleToMatrix() {
-  if (!AppState._generatedScheduleTemp || AppState._generatedScheduleTemp.length === 0) {
-    return showToast('Belum ada jadwal yang di-generate!', 'warning');
+  if (!AppState.jadwal || AppState.jadwal.length === 0) {
+    if (AppState._generatedScheduleTemp && AppState._generatedScheduleTemp.length > 0) {
+      AppState.jadwal = AppState._generatedScheduleTemp;
+    } else {
+      return showToast('Belum ada jadwal yang di-generate!', 'warning');
+    }
   }
 
-  AppState.jadwal = AppState._generatedScheduleTemp;
   saveToLocalStorage();
   calculateClashes();
   closeGenerateResultModal();
@@ -3277,10 +3569,10 @@ function handleOrientationChange(val) {
 
   if (selVal === 'portrait') {
     if (doc) doc.classList.add('print-portrait');
-    styleEl.innerHTML = `@media print { @page { size: A4 portrait !important; margin: 6mm 5mm !important; } }`;
+    styleEl.innerHTML = `@media print { @page { size: A4 portrait !important; margin: 4mm 3mm !important; } }`;
   } else {
     if (doc) doc.classList.remove('print-portrait');
-    styleEl.innerHTML = `@media print { @page { size: A4 landscape !important; margin: 8mm 6mm !important; } }`;
+    styleEl.innerHTML = `@media print { @page { size: A4 landscape !important; margin: 6mm 5mm !important; } }`;
   }
 }
 
@@ -3445,15 +3737,15 @@ function renderPrintableDocument() {
           <table class="table-schedule-preview">
             <thead>
               <tr>
-                <th style="width: 45px;">JAM</th>
-                <th style="width: 105px;">WAKTU<br>PELAJARAN</th>
-                <th style="width: 110px;">SENIN</th>
-                <th style="width: 110px;">SELASA</th>
-                <th style="width: 110px;">RABU</th>
-                <th style="width: 110px;">KAMIS</th>
-                <th style="width: 105px;">WAKTU<br>PELAJARAN</th>
-                <th style="width: 110px;">JUM'AT</th>
-                <th style="width: 110px;">SABTU</th>
+                <th style="width: 6%;">JAM</th>
+                <th style="width: 13%;">WAKTU<br>PELAJARAN</th>
+                <th style="width: 12%;">SENIN</th>
+                <th style="width: 12%;">SELASA</th>
+                <th style="width: 12%;">RABU</th>
+                <th style="width: 12%;">KAMIS</th>
+                <th style="width: 12%;">WAKTU<br>PELAJARAN</th>
+                <th style="width: 11%;">JUM'AT</th>
+                <th style="width: 10%;">SABTU</th>
               </tr>
             </thead>
             <tbody>
@@ -3621,15 +3913,15 @@ function renderPrintableDocument() {
           <table class="table-schedule-preview">
             <thead>
               <tr>
-                <th style="width: 45px;">JAM</th>
-                <th style="width: 105px;">WAKTU<br>PELAJARAN</th>
-                <th style="width: 110px;">SENIN</th>
-                <th style="width: 110px;">SELASA</th>
-                <th style="width: 110px;">RABU</th>
-                <th style="width: 110px;">KAMIS</th>
-                <th style="width: 105px;">WAKTU<br>PELAJARAN</th>
-                <th style="width: 110px;">JUM'AT</th>
-                <th style="width: 110px;">SABTU</th>
+                <th style="width: 6%;">JAM</th>
+                <th style="width: 13%;">WAKTU<br>PELAJARAN</th>
+                <th style="width: 12%;">SENIN</th>
+                <th style="width: 12%;">SELASA</th>
+                <th style="width: 12%;">RABU</th>
+                <th style="width: 12%;">KAMIS</th>
+                <th style="width: 12%;">WAKTU<br>PELAJARAN</th>
+                <th style="width: 11%;">JUM'AT</th>
+                <th style="width: 10%;">SABTU</th>
               </tr>
             </thead>
             <tbody>

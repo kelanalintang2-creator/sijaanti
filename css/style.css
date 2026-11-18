@@ -185,16 +185,23 @@ th.sticky-time-col {
 }
 
 /* Portrait Mode Styles */
+.print-portrait {
+  padding: 4mm !important;
+  max-width: 100% !important;
+  width: 100% !important;
+}
+
 .print-portrait .table-schedule-preview th,
 .print-portrait .table-schedule-preview td {
-  padding: 2px 2px !important;
-  font-size: 8px !important;
-  height: 25px !important;
-  max-height: 25px !important;
+  padding: 1.5px 1px !important;
+  font-size: 7.5px !important;
+  height: 22px !important;
+  max-height: 22px !important;
 }
 
 .print-portrait .table-schedule-preview td .shrink-cell {
-  font-size: 7.5px !important;
+  font-size: 7px !important;
+  letter-spacing: -0.2px !important;
 }
 
 @media print {
@@ -253,9 +260,14 @@ th.sticky-time-col {
   #printable-document {
     box-shadow: none !important;
     border: none !important;
-    padding: 10mm !important;
+    padding: 6mm 5mm !important;
     width: 100% !important;
     max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  #printable-document.print-portrait {
+    padding: 3mm 2mm !important;
   }
 
   @page {

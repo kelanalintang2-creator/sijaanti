@@ -1180,9 +1180,13 @@
             <span class="material-symbols-outlined text-[16px]">refresh</span>
             <span>Generate Ulang</span>
           </button>
-          <button type="button" onclick="applyGeneratedScheduleToMatrix()" class="px-4 py-2 rounded-lg text-xs font-bold bg-primary text-white hover:bg-primary-hover shadow-sm flex items-center gap-1 cursor-pointer">
+          <button type="button" onclick="closeGenerateResultModal(); navigateView('matrix');" class="px-4 py-2 rounded-lg text-xs font-bold bg-primary text-white hover:bg-primary-hover shadow-sm flex items-center gap-1 cursor-pointer">
             <span class="material-symbols-outlined text-[16px]">calendar_month</span>
-            <span>Lihat & Tata di Matriks</span>
+            <span>Lihat di Papan Plotting</span>
+          </button>
+          <button type="button" onclick="closeGenerateResultModal(); navigateView('export');" class="px-4 py-2 rounded-lg text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm flex items-center gap-1 cursor-pointer">
+            <span class="material-symbols-outlined text-[16px]">print</span>
+            <span>Lihat di Pratinjau SK</span>
           </button>
         </div>
       </div>
