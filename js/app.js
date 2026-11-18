@@ -344,43 +344,47 @@ function updateLoginTeacherCredentials(teacherId) {
 async function handleLoginSubmit(e) {
   if (e && e.preventDefault) e.preventDefault();
   const role = AppState.loginSelectedRole;
-  const username = document.getElementById('login-username')?.value || '';
+  const username = document.getElementById('login-username')?.value?.trim() || '';
+  const password = document.getElementById('login-password')?.value?.trim() || '';
   const teacherId = document.getElementById('login-teacher-select')?.value || 'G02';
+
+  if (!username) {
+    return showToast('Masukkan NIP atau Username terlebih dahulu!', 'warning');
+  }
 
   const btn = document.getElementById('btn-login-submit');
   if (btn) btn.classList.add('opacity-75');
 
-  showToast('Memverifikasi sesi dengan REST API...', 'info');
+  showToast('Memverifikasi pengguna dengan database spreadsheet...', 'info');
 
-  // Panggil endpoint authLogin backend
-  const res = await apiPost('authLogin', { role, username, teacherId });
+  // Panggil endpoint authLogin backend dengan validasi ketat dari spreadsheet
+  const res = await apiPost('authLogin', { role, username, password, teacherId });
   if (btn) btn.classList.remove('opacity-75');
 
   if (res && res.success && res.user) {
     executeLogin(res.user, res.token);
   } else {
-    // Fallback offline login untuk kenyamanan pengujian
-    fallbackLocalLogin(role, teacherId);
+    const errMsg = (res && res.message) ? res.message : 'Akses Ditolak: Pengguna tidak terdaftar di database spreadsheet atau kata sandi salah.';
+    showToast(errMsg, 'error');
   }
 }
 
 function quickLogin(roleKey) {
   selectLoginRole(roleKey);
-  fallbackLocalLogin(roleKey, 'G02');
-}
-
-function fallbackLocalLogin(roleKey, teacherId = 'G02') {
-  let userObj = {};
+  const usernameInput = document.getElementById('login-username');
+  const passwordInput = document.getElementById('login-password');
   if (roleKey === 'admin') {
-    userObj = { role: 'admin', username: '19791104 200501 1 003', name: 'Bambang Sugiantoro, S.Pd.SD', nip: '19791104 200501 1 003', title: 'Tim Kurikulum (Admin)' };
+    if (usernameInput) usernameInput.value = '19791104 200501 1 003';
+    if (passwordInput) passwordInput.value = 'admin123';
   } else if (roleKey === 'kepsek') {
-    userObj = { role: 'kepsek', username: '19740512 199803 2 004', name: 'Dra. Sri Mulyani, M.Pd', nip: '19740512 199803 2 004', title: 'Kepala Sekolah' };
+    if (usernameInput) usernameInput.value = '19740512 199803 2 004';
+    if (passwordInput) passwordInput.value = 'kepsek123';
   } else {
-    const g = (AppState.master.guru || []).find(it => it.id === teacherId) || { id: 'G02', nama: 'Ahmad Fauzi', gelar: 'S.Pd.SD', nip: '19820315 200604 1 008', mapel_utama: 'Guru Kelas 4' };
-    userObj = { role: 'guru', teacherId: g.id, username: g.nip, name: g.nama + (g.gelar ? ', ' + g.gelar : ''), nip: g.nip, title: g.mapel_utama || 'Guru Kelas 4A' };
-    AppState.selectedTeacherId = g.id;
+    const teacherSel = document.getElementById('login-teacher-select');
+    if (teacherSel && teacherSel.value) updateLoginTeacherCredentials(teacherSel.value);
+    if (passwordInput) passwordInput.value = 'guru123';
   }
-  executeLogin(userObj, 'OFFLINE_TOKEN_' + Date.now());
+  handleLoginSubmit();
 }
 
 function executeLogin(userObj, token) {
@@ -390,6 +394,9 @@ function executeLogin(userObj, token) {
 
   SafeStorage.set(APP_CONFIG.STORAGE_KEY_AUTH, JSON.stringify({ isLoggedIn: true, user: userObj, timestamp: Date.now() }));
   if (token) SafeStorage.set(APP_CONFIG.STORAGE_KEY_AUTH + '_TOKEN', token);
+
+  // Pastikan data yang tersimpan di localStorage termuat sempurna
+  loadFromLocalStorage();
 
   showAppLayout();
   setupRoleUI();
@@ -401,9 +408,13 @@ function executeLogin(userObj, token) {
   }
 
   showToast(`Selamat datang, ${userObj.name}`, 'success');
+
+  // Sinkronkan data terbaru dari server di latar belakang
+  fetchServerData();
 }
 
 function logoutUser() {
+  saveToLocalStorage(); // Amankan seluruh perubahan data sebelum logout
   AppState.isLoggedIn = false;
   AppState.authToken = '';
   SafeStorage.remove(APP_CONFIG.STORAGE_KEY_AUTH);
@@ -934,20 +945,39 @@ function renderMatrixTable() {
   const guruMap = {}; masterGuru.forEach(g => { guruMap[g.id] = g; });
   const clashJadwalIds = new Set(AppState.clashes.map(c => c.jadwalId));
 
+  // Ambil daftar hari aktif yang dikonfigurasi pada menu Waktu & Jam Belajar (jumlah_jp > 0)
+  const configuredDays = Object.keys(AppState.timeConfig?.dailyConfig || {}).filter(d => (AppState.timeConfig.dailyConfig[d].jumlah_jp || 0) > 0);
+  const activeDays = configuredDays.length > 0 ? configuredDays : ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+
+  // Sinkronkan tombol hari pada filter-days-container
+  const filterDaysContainer = document.getElementById('filter-days-container');
+  if (filterDaysContainer) {
+    if (!activeDays.includes(AppState.selectedDay)) {
+      AppState.selectedDay = activeDays[0] || 'Senin';
+    }
+    filterDaysContainer.innerHTML = activeDays.map(d => `
+      <button type="button" onclick="setSelectedDay('${d}')" data-day="${d}" class="matrix-day-btn px-3 py-1.5 rounded-lg text-xs font-bold ${d === AppState.selectedDay ? 'bg-primary text-white' : 'bg-slate-100 text-text-secondary hover:bg-slate-200'} transition-colors cursor-pointer">
+        ${d}
+      </button>
+    `).join('');
+  }
+
   if (mode === 'class') {
+    // Mode Kelas Per Hari: Tampilkan hanya slot hari terpilih sesuai konfigurasi waktu & jam belajar
     let dayWaktu = masterWaktu.filter(w => w.hari === AppState.selectedDay);
     if (!dayWaktu || dayWaktu.length === 0) {
       const cfg = getDayConfigOrDefault(AppState.selectedDay);
       dayWaktu = generateDayTimeSlots(cfg, AppState.selectedDay).slots;
     }
     
+    // Header Kolom: Tepat sebanyak jumlah kelas yang ada di Master Kelas (tidak ada kolom sisa)
     let thHtml = `<tr><th class="p-3 sticky-time-col border-r border-border-subtle w-36">Waktu & JP</th>`;
     masterKelas.forEach(k => {
       const hasClash = AppState.clashes.some(c => c.hari === AppState.selectedDay && c.kelasId === k.id);
       thHtml += `
         <th class="p-3 text-center border-r border-border-subtle min-w-[140px]">
           <div class="flex items-center justify-center gap-1">
-            <span>${k.nama_rombel}</span>
+            <span>${k.nama_rombel || k.kode_kelas}</span>
             ${hasClash ? '<span class="text-rose-500 font-bold" title="Ada bentrok di kelas ini">⚠️</span>' : ''}
           </div>
         </th>
@@ -993,16 +1023,24 @@ function renderMatrixTable() {
     tbody.innerHTML = tbodyHtml;
 
   } else if (mode === 'single-class') {
+    // Mode 1 Kelas Penuh: Kolom hanya hari aktif yang disetting
     const selectedClass = masterKelas.find(k => k.id === AppState.selectedClassId) || masterKelas[0];
-    const days = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
     let thHtml = `<tr><th class="p-3 sticky-time-col border-r border-border-subtle w-32">Jam Pelajaran</th>`;
-    days.forEach(d => { thHtml += `<th class="p-3 text-center border-r border-border-subtle min-w-[150px]">${d}</th>`; });
+    activeDays.forEach(d => { thHtml += `<th class="p-3 text-center border-r border-border-subtle min-w-[150px]">${d}</th>`; });
     thHtml += `</tr>`;
     thead.innerHTML = thHtml;
 
+    // Hitung JP maksimal di antara hari-hari aktif
+    let maxJp = 0;
+    activeDays.forEach(d => {
+      const cfg = getDayConfigOrDefault(d);
+      if ((cfg.jumlah_jp || 0) > maxJp) maxJp = cfg.jumlah_jp;
+    });
+    if (maxJp === 0) maxJp = 8;
+
     let tbodyHtml = '';
-    for (let jp = 1; jp <= 8; jp++) {
+    for (let jp = 1; jp <= maxJp; jp++) {
       const jpTime = getSlotTime('Senin', jp);
       tbodyHtml += `
         <tr>
@@ -1011,7 +1049,16 @@ function renderMatrixTable() {
             ${jpTime ? `<div class="text-[9px] text-text-secondary font-medium">${jpTime}</div>` : ''}
           </td>
       `;
-      days.forEach(d => {
+      activeDays.forEach(d => {
+        const dayCfg = getDayConfigOrDefault(d);
+        if (jp > (dayCfg.jumlah_jp || 8)) {
+          tbodyHtml += `
+            <td class="p-1.5 border-r border-border-subtle bg-slate-50/60 text-center">
+              <div class="h-20 rounded-xl border border-dashed border-slate-200 flex items-center justify-center text-slate-300 font-bold text-xs">-</div>
+            </td>
+          `;
+          return;
+        }
         const item = jadwal.find(it => it.hari === d && parseInt(it.jp) === jp && it.kelas_id === selectedClass.id);
         const hasClash = item && clashJadwalIds.has(item.id);
         tbodyHtml += `
@@ -1025,17 +1072,23 @@ function renderMatrixTable() {
     tbody.innerHTML = tbodyHtml;
 
   } else {
-    // Mode Guru
+    // Mode Guru: Kolom hanya hari aktif yang disetting
     const teacherId = AppState.selectedTeacherId;
-    const days = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
     let thHtml = `<tr><th class="p-3 sticky-time-col border-r border-border-subtle w-32">Jam Pelajaran</th>`;
-    days.forEach(d => { thHtml += `<th class="p-3 text-center border-r border-border-subtle min-w-[150px]">${d}</th>`; });
+    activeDays.forEach(d => { thHtml += `<th class="p-3 text-center border-r border-border-subtle min-w-[150px]">${d}</th>`; });
     thHtml += `</tr>`;
     thead.innerHTML = thHtml;
 
+    let maxJp = 0;
+    activeDays.forEach(d => {
+      const cfg = getDayConfigOrDefault(d);
+      if ((cfg.jumlah_jp || 0) > maxJp) maxJp = cfg.jumlah_jp;
+    });
+    if (maxJp === 0) maxJp = 8;
+
     let tbodyHtml = '';
-    for (let jp = 1; jp <= 8; jp++) {
+    for (let jp = 1; jp <= maxJp; jp++) {
       const jpTime = getSlotTime('Senin', jp);
       tbodyHtml += `
         <tr>
@@ -1044,7 +1097,16 @@ function renderMatrixTable() {
             ${jpTime ? `<div class="text-[9px] text-text-secondary font-medium">${jpTime}</div>` : ''}
           </td>
       `;
-      days.forEach(d => {
+      activeDays.forEach(d => {
+        const dayCfg = getDayConfigOrDefault(d);
+        if (jp > (dayCfg.jumlah_jp || 8)) {
+          tbodyHtml += `
+            <td class="p-1.5 border-r border-border-subtle bg-slate-50/60 text-center">
+              <div class="h-20 rounded-xl border border-dashed border-slate-200 flex items-center justify-center text-slate-300 font-bold text-xs">-</div>
+            </td>
+          `;
+          return;
+        }
         const item = jadwal.find(it => it.hari === d && parseInt(it.jp) === jp && it.guru_id === teacherId);
         const hasClash = item && clashJadwalIds.has(item.id);
         tbodyHtml += `
@@ -2190,8 +2252,9 @@ function loadSchoolIdentity() {
   setText('print-kepsek-nama', kepsek);
   setText('print-kepsek-nip', `NIP. ${nipKepsek}`);
 
-  // 4. Sinkronkan Logo di seluruh elemen tampilan
+  // 4. Sinkronkan Logo & QR Code di seluruh elemen tampilan
   updateSchoolLogoUI(logoSekolah);
+  updatePrintDocumentQRCode();
 }
 
 function updateSchoolLogoUI(logoSrc) {
@@ -2857,7 +2920,10 @@ function renderBebanView() {
         <td class="p-3 text-center font-bold text-text-primary">${a.jp_per_minggu} JP</td>
         <td class="p-3 text-center font-extrabold text-primary">${totalRowJp} JP</td>
         <td class="p-3 text-text-secondary text-[11px]">${a.keterangan || '-'}</td>
-        <td class="p-3 text-right">
+        <td class="p-3 text-right whitespace-nowrap">
+          <button type="button" onclick="editAssignmentItem('${a.id}')" class="p-1 rounded text-primary hover:text-primary-hover hover:bg-slate-100 cursor-pointer mr-1" title="Edit Alokasi">
+            <span class="material-symbols-outlined text-[18px]">edit</span>
+          </button>
           <button type="button" onclick="deleteAssignmentItem('${a.id}')" class="p-1 rounded text-text-secondary hover:text-rose-600 hover:bg-slate-100 cursor-pointer" title="Hapus Alokasi">
             <span class="material-symbols-outlined text-[18px]">delete</span>
           </button>
@@ -2867,11 +2933,23 @@ function renderBebanView() {
   }).join('');
 }
 
+function editAssignmentItem(id) {
+  openAddAssignmentModal(id);
+}
+
 function openAddAssignmentModal(id = null) {
+  AppState._editingAssignmentId = id;
   const modal = document.getElementById('modal-assignment-crud');
+  const titleEl = document.getElementById('modal-assignment-title');
+  const btnSave = document.getElementById('btn-save-assignment');
   const guruSel = document.getElementById('assign-select-guru');
   const mapelSel = document.getElementById('assign-select-mapel');
   const kelasContainer = document.getElementById('assign-kelas-checkboxes');
+  const jpInput = document.getElementById('assign-jp-per-class');
+  const ketInput = document.getElementById('assign-keterangan');
+
+  if (titleEl) titleEl.textContent = id ? 'Edit Alokasi Beban Mengajar' : 'Tambah Alokasi Beban Mengajar';
+  if (btnSave) btnSave.textContent = id ? 'Simpan Perubahan' : 'Simpan Alokasi';
 
   if (guruSel) {
     guruSel.innerHTML = (AppState.master.guru || []).map(g => `<option value="${g.id}">${g.nama} (${g.mapel_utama})</option>`).join('');
@@ -2879,13 +2957,27 @@ function openAddAssignmentModal(id = null) {
   if (mapelSel) {
     mapelSel.innerHTML = (AppState.master.mapel || []).map(m => `<option value="${m.id}">${m.nama} (${m.kode})</option>`).join('');
   }
+
+  const existing = id ? (AppState.beban || []).find(a => a.id === id) : null;
+  const existingClasses = existing ? (Array.isArray(existing.kelas_ids) ? existing.kelas_ids : String(existing.kelas_ids || '').split(',').map(s => s.trim())) : [];
+
   if (kelasContainer) {
     kelasContainer.innerHTML = (AppState.master.kelas || []).map(k => `
       <label class="flex items-center gap-1.5 p-1 rounded hover:bg-white cursor-pointer">
-        <input type="checkbox" value="${k.id}" class="assign-kelas-chk" onchange="updateAssignmentTotalPreview()">
+        <input type="checkbox" value="${k.id}" class="assign-kelas-chk" onchange="updateAssignmentTotalPreview()" ${existingClasses.includes(k.id) ? 'checked' : ''}>
         <span class="font-bold text-text-primary">${k.kode_kelas}</span>
       </label>
     `).join('');
+  }
+
+  if (existing) {
+    if (guruSel) guruSel.value = existing.guru_id;
+    if (mapelSel) mapelSel.value = existing.mapel_id;
+    if (jpInput) jpInput.value = existing.jp_per_minggu || 4;
+    if (ketInput) ketInput.value = existing.keterangan || '';
+  } else {
+    if (jpInput) jpInput.value = 4;
+    if (ketInput) ketInput.value = '';
   }
 
   updateAssignmentTotalPreview();
@@ -2902,6 +2994,7 @@ function closeAssignmentModal() {
     modal.style.display = 'none';
     modal.classList.add('hidden');
   }
+  AppState._editingAssignmentId = null;
 }
 
 function updateAssignmentTotalPreview() {
@@ -2928,20 +3021,36 @@ async function saveAssignmentItem() {
     return showToast('Pilih minimal satu rombel / kelas!', 'warning');
   }
 
-  const newAssignment = {
-    id: `BM_${Date.now()}`,
-    guru_id: guruId,
-    mapel_id: mapelId,
-    kelas_ids: selectedClasses,
-    jp_per_minggu: jp,
-    keterangan: ket
-  };
+  if (AppState._editingAssignmentId) {
+    const idx = (AppState.beban || []).findIndex(a => a.id === AppState._editingAssignmentId);
+    if (idx >= 0) {
+      AppState.beban[idx] = {
+        ...AppState.beban[idx],
+        guru_id: guruId,
+        mapel_id: mapelId,
+        kelas_ids: selectedClasses,
+        jp_per_minggu: jp,
+        keterangan: ket
+      };
+      showToast('Alokasi beban mengajar berhasil diperbarui!', 'success');
+    }
+  } else {
+    const newAssignment = {
+      id: `BM_${Date.now()}`,
+      guru_id: guruId,
+      mapel_id: mapelId,
+      kelas_ids: selectedClasses,
+      jp_per_minggu: jp,
+      keterangan: ket
+    };
+    AppState.beban.push(newAssignment);
+    showToast('Alokasi beban mengajar berhasil ditambahkan!', 'success');
+  }
 
-  AppState.beban.push(newAssignment);
+  AppState._editingAssignmentId = null;
   saveToLocalStorage();
   closeAssignmentModal();
   renderBebanView();
-  showToast('Alokasi beban mengajar berhasil ditambahkan!', 'success');
 
   apiPost('saveTeachingAssignments', { assignments: AppState.beban });
 }
@@ -2951,7 +3060,7 @@ async function deleteAssignmentItem(id) {
   AppState.beban = (AppState.beban || []).filter(a => a.id !== id);
   saveToLocalStorage();
   renderBebanView();
-  showToast('Alokasi dihapus', 'info');
+  showToast('Alokasi beban mengajar berhasil dihapus!', 'info');
 
   apiPost('saveTeachingAssignments', { assignments: AppState.beban });
 }
@@ -3142,7 +3251,8 @@ function applyGeneratedScheduleToMatrix() {
   closeGenerateResultModal();
   navigateView('matrix');
   renderMatrixTable();
-  showToast('Jadwal hasil generator otomatis berhasil diterapkan ke Matriks KBM!', 'success');
+  saveMatrixChangesToServer(); // Langsung sinkronkan ke database Google Sheets
+  showToast('Jadwal hasil generator otomatis berhasil diterapkan dan disimpan ke database!', 'success');
 }
 
 // ============================================================================
@@ -3152,6 +3262,50 @@ function renderExportView() {
   populateExportClassDropdown();
   populateExportTeacherDropdown();
   renderPrintableDocument();
+  updatePrintDocumentQRCode();
+}
+
+function handleOrientationChange(val) {
+  const selVal = val || document.getElementById('export-orientation-select')?.value || 'landscape';
+  const doc = document.getElementById('printable-document');
+  let styleEl = document.getElementById('dynamic-print-page-style');
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = 'dynamic-print-page-style';
+    document.head.appendChild(styleEl);
+  }
+
+  if (selVal === 'portrait') {
+    if (doc) doc.classList.add('print-portrait');
+    styleEl.innerHTML = `@media print { @page { size: A4 portrait !important; margin: 6mm 5mm !important; } }`;
+  } else {
+    if (doc) doc.classList.remove('print-portrait');
+    styleEl.innerHTML = `@media print { @page { size: A4 landscape !important; margin: 8mm 6mm !important; } }`;
+  }
+}
+
+function updatePrintDocumentQRCode() {
+  const qrImg = document.getElementById('print-school-qrcode-img');
+  if (!qrImg) return;
+
+  const cfg = {};
+  if (AppState.master && AppState.master.sekolah) {
+    AppState.master.sekolah.forEach(item => {
+      if (item && item.kunci) cfg[item.kunci] = item.nilai;
+    });
+  }
+
+  const schName = cfg.nama_sekolah || 'SDN PILANGREJO 1';
+  const npsn = cfg.npsn || '20507812';
+  const ta = cfg.tahun_ajaran || '2024/2025';
+  const sem = cfg.semester || 'Ganjil';
+  const payload = `VERIF-SK-KBM:${npsn}|${schName}|TP:${ta}|SEM:${sem}|HASH:${Date.now().toString(36).toUpperCase()}`;
+
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&margin=0&data=${encodeURIComponent(payload)}`;
+  qrImg.src = qrUrl;
+  qrImg.onerror = function() {
+    qrImg.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="white"/><rect x="10" y="10" width="25" height="25" fill="black"/><rect x="15" y="15" width="15" height="15" fill="white"/><rect x="18" y="18" width="9" height="9" fill="black"/><rect x="65" y="10" width="25" height="25" fill="black"/><rect x="70" y="15" width="15" height="15" fill="white"/><rect x="73" y="18" width="9" height="9" fill="black"/><rect x="10" y="65" width="25" height="25" fill="black"/><rect x="15" y="70" width="15" height="15" fill="white"/><rect x="18" y="73" width="9" height="9" fill="black"/><rect x="45" y="15" width="10" height="10" fill="black"/><rect x="45" y="45" width="10" height="10" fill="black"/><rect x="45" y="75" width="10" height="10" fill="black"/><rect x="65" y="45" width="10" height="10" fill="black"/><rect x="75" y="65" width="10" height="10" fill="black"/><rect x="85" y="75" width="5" height="15" fill="black"/></svg>`;
+  };
 }
 
 function handleExportModeChange() {
@@ -3251,6 +3405,11 @@ function renderPrintableDocument() {
 
   let html = '';
 
+  const wrapShrink = (val) => {
+    if (!val || val === '') return '';
+    return `<div class="shrink-cell" title="${String(val).replace(/"/g, '&quot;')}">${val}</div>`;
+  };
+
   if (exportMode === 'teacher') {
     // =========================================================================
     // MODE PRATINJAU JADWAL PER GURU (Sesuai Gambar 3)
@@ -3302,39 +3461,39 @@ function renderPrintableDocument() {
               <tr>
                 <td class="text-center font-bold">I</td>
                 <td class="text-center font-medium">${getSlotTime('Senin', 1) || '07.00 – 07.45'}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Senin', 1)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Selasa', 1)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Rabu', 1)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Kamis', 1)}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Senin', 1))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Selasa', 1))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Rabu', 1))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Kamis', 1))}</td>
                 <td class="text-center font-medium">${getSlotTime('Jumat', 1) || '07.00 – 07.40'}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Jumat', 1)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Sabtu', 1) || 'Istighosah'}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Jumat', 1))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Sabtu', 1) || 'Istighosah')}</td>
               </tr>
 
               <!-- Row 2: JAM II -->
               <tr>
                 <td class="text-center font-bold">II</td>
                 <td class="text-center font-medium">${getSlotTime('Senin', 2) || '07.45 – 08.30'}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Senin', 2)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Selasa', 2)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Rabu', 2)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Kamis', 2)}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Senin', 2))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Selasa', 2))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Rabu', 2))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Kamis', 2))}</td>
                 <td class="text-center font-medium">${getSlotTime('Jumat', 2) || '07.40 – 08.20'}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Jumat', 2)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Sabtu', 2)}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Jumat', 2))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Sabtu', 2))}</td>
               </tr>
 
               <!-- Row 3: JAM III -->
               <tr>
                 <td class="text-center font-bold">III</td>
                 <td class="text-center font-medium">${getSlotTime('Senin', 3) || '08.30 – 09.15'}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Senin', 3)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Selasa', 3)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Rabu', 3)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Kamis', 3)}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Senin', 3))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Selasa', 3))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Rabu', 3))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Kamis', 3))}</td>
                 <td class="text-center font-medium">${getSlotTime('Jumat', 3) || '08.20 – 09.00'}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Jumat', 3)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Sabtu', 3)}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Jumat', 3))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Sabtu', 3))}</td>
               </tr>
 
               <!-- Row 4: Istirahat -->
@@ -3343,7 +3502,7 @@ function renderPrintableDocument() {
                 <td class="text-center font-medium">${getBreakTime('Senin', 1) || '09.15 – 09.30'}</td>
                 <td colspan="4" class="cell-break">I s t i r a h a t</td>
                 <td class="text-center font-medium">${getSlotTime('Jumat', 4) || '09.00 – 09.40'}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Jumat', 4)}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Jumat', 4))}</td>
                 <td class="cell-break">Istirahat</td>
               </tr>
 
@@ -3351,39 +3510,39 @@ function renderPrintableDocument() {
               <tr>
                 <td class="text-center font-bold">IV</td>
                 <td class="text-center font-medium">${getSlotTime('Senin', 4) || '09.30 – 10.15'}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Senin', 4)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Selasa', 4)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Rabu', 4)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Kamis', 4)}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Senin', 4))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Selasa', 4))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Rabu', 4))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Kamis', 4))}</td>
                 <td class="text-center font-medium">${getBreakTime('Jumat', 1) || '09.40 – 09.55'}</td>
                 <td class="cell-break">Istirahat</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Sabtu', 4)}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Sabtu', 4))}</td>
               </tr>
 
               <!-- Row 6: JAM V -->
               <tr>
                 <td class="text-center font-bold">V</td>
                 <td class="text-center font-medium">${getSlotTime('Senin', 5) || '10.15 – 11.00'}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Senin', 5)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Selasa', 5)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Rabu', 5)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Kamis', 5)}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Senin', 5))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Selasa', 5))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Rabu', 5))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Kamis', 5))}</td>
                 <td class="text-center font-medium">${getSlotTime('Jumat', 5) || '09.55 – 10.35'}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Jumat', 5)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Sabtu', 5)}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Jumat', 5))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Sabtu', 5))}</td>
               </tr>
 
               <!-- Row 7: JAM VI -->
               <tr>
                 <td class="text-center font-bold">VI</td>
                 <td class="text-center font-medium">${getSlotTime('Senin', 6) || '11.00 – 11.45'}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Senin', 6)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Selasa', 6)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Rabu', 6)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Kamis', 6)}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Senin', 6))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Selasa', 6))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Rabu', 6))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Kamis', 6))}</td>
                 <td class="text-center font-medium">${getSlotTime('Jumat', 6) || '10.35 – 11.15'}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Jumat', 6)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Sabtu', 6)}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Jumat', 6))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Sabtu', 6))}</td>
               </tr>
 
               <!-- Row 8: Jama'ah Sholat Dzuhur -->
@@ -3400,10 +3559,10 @@ function renderPrintableDocument() {
               <tr>
                 <td class="text-center font-bold">VII</td>
                 <td class="text-center font-medium">${getSlotTime('Senin', 7) || '12.15 – 13.00'}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Senin', 7)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Selasa', 7)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Rabu', 7)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Kamis', 7)}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Senin', 7))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Selasa', 7))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Rabu', 7))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Kamis', 7))}</td>
                 <td class="text-center font-medium"></td>
                 <td class="text-center font-bold"></td>
                 <td class="text-center font-bold"></td>
@@ -3413,10 +3572,10 @@ function renderPrintableDocument() {
               <tr>
                 <td class="text-center font-bold">VIII</td>
                 <td class="text-center font-medium">${getSlotTime('Senin', 8) || '13.00 – 13.45'}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Senin', 8)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Selasa', 8)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Rabu', 8)}</td>
-                <td class="text-center font-bold">${getTeacherCell(g.id, 'Kamis', 8)}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Senin', 8))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Selasa', 8))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Rabu', 8))}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Kamis', 8))}</td>
                 <td class="text-center font-medium"></td>
                 <td class="text-center font-bold"></td>
                 <td class="text-center font-bold"></td>
@@ -3478,39 +3637,39 @@ function renderPrintableDocument() {
               <tr>
                 <td class="text-center font-bold">I</td>
                 <td class="text-center font-medium">${getSlotTime('Senin', 1) || '07.00 – 07.45'}</td>
-                <td class="text-center">${getSlot(k.id, 'Senin', 1)}</td>
-                <td class="text-center">${getSlot(k.id, 'Selasa', 1)}</td>
-                <td class="text-center">${getSlot(k.id, 'Rabu', 1)}</td>
-                <td class="text-center">${getSlot(k.id, 'Kamis', 1)}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Senin', 1))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Selasa', 1))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Rabu', 1))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Kamis', 1))}</td>
                 <td class="text-center font-medium">${getSlotTime('Jumat', 1) || '07.00 – 07.40'}</td>
-                <td class="text-center">${getSlot(k.id, 'Jumat', 1)}</td>
-                <td class="text-center">${getSlot(k.id, 'Sabtu', 1) || 'Istighosah'}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Jumat', 1))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Sabtu', 1) || 'Istighosah')}</td>
               </tr>
 
               <!-- Row 2: JAM II -->
               <tr>
                 <td class="text-center font-bold">II</td>
                 <td class="text-center font-medium">${getSlotTime('Senin', 2) || '07.45 – 08.30'}</td>
-                <td class="text-center">${getSlot(k.id, 'Senin', 2)}</td>
-                <td class="text-center">${getSlot(k.id, 'Selasa', 2)}</td>
-                <td class="text-center">${getSlot(k.id, 'Rabu', 2)}</td>
-                <td class="text-center">${getSlot(k.id, 'Kamis', 2)}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Senin', 2))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Selasa', 2))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Rabu', 2))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Kamis', 2))}</td>
                 <td class="text-center font-medium">${getSlotTime('Jumat', 2) || '07.40 – 08.20'}</td>
-                <td class="text-center">${getSlot(k.id, 'Jumat', 2)}</td>
-                <td class="text-center">${getSlot(k.id, 'Sabtu', 2)}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Jumat', 2))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Sabtu', 2))}</td>
               </tr>
 
               <!-- Row 3: JAM III -->
               <tr>
                 <td class="text-center font-bold">III</td>
                 <td class="text-center font-medium">${getSlotTime('Senin', 3) || '08.30 – 09.15'}</td>
-                <td class="text-center">${getSlot(k.id, 'Senin', 3)}</td>
-                <td class="text-center">${getSlot(k.id, 'Selasa', 3)}</td>
-                <td class="text-center">${getSlot(k.id, 'Rabu', 3)}</td>
-                <td class="text-center">${getSlot(k.id, 'Kamis', 3)}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Senin', 3))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Selasa', 3))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Rabu', 3))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Kamis', 3))}</td>
                 <td class="text-center font-medium">${getSlotTime('Jumat', 3) || '08.20 – 09.00'}</td>
-                <td class="text-center">${getSlot(k.id, 'Jumat', 3)}</td>
-                <td class="text-center">${getSlot(k.id, 'Sabtu', 3)}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Jumat', 3))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Sabtu', 3))}</td>
               </tr>
 
               <!-- Row 4: Istirahat -->
@@ -3519,7 +3678,7 @@ function renderPrintableDocument() {
                 <td class="text-center font-medium">${getBreakTime('Senin', 1) || '09.15 – 09.30'}</td>
                 <td colspan="4" class="cell-break">I s t i r a h a t</td>
                 <td class="text-center font-medium">${getSlotTime('Jumat', 4) || '09.00 – 09.40'}</td>
-                <td class="text-center">${getSlot(k.id, 'Jumat', 4)}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Jumat', 4))}</td>
                 <td class="cell-break">Istirahat</td>
               </tr>
 
@@ -3527,39 +3686,39 @@ function renderPrintableDocument() {
               <tr>
                 <td class="text-center font-bold">IV</td>
                 <td class="text-center font-medium">${getSlotTime('Senin', 4) || '09.30 – 10.15'}</td>
-                <td class="text-center">${getSlot(k.id, 'Senin', 4)}</td>
-                <td class="text-center">${getSlot(k.id, 'Selasa', 4)}</td>
-                <td class="text-center">${getSlot(k.id, 'Rabu', 4)}</td>
-                <td class="text-center">${getSlot(k.id, 'Kamis', 4)}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Senin', 4))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Selasa', 4))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Rabu', 4))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Kamis', 4))}</td>
                 <td class="text-center font-medium">${getBreakTime('Jumat', 1) || '09.40 – 09.55'}</td>
                 <td class="cell-break">Istirahat</td>
-                <td class="text-center">${getSlot(k.id, 'Sabtu', 4)}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Sabtu', 4))}</td>
               </tr>
 
               <!-- Row 6: JAM V -->
               <tr>
                 <td class="text-center font-bold">V</td>
                 <td class="text-center font-medium">${getSlotTime('Senin', 5) || '10.15 – 11.00'}</td>
-                <td class="text-center">${getSlot(k.id, 'Senin', 5)}</td>
-                <td class="text-center">${getSlot(k.id, 'Selasa', 5)}</td>
-                <td class="text-center">${getSlot(k.id, 'Rabu', 5)}</td>
-                <td class="text-center">${getSlot(k.id, 'Kamis', 5)}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Senin', 5))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Selasa', 5))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Rabu', 5))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Kamis', 5))}</td>
                 <td class="text-center font-medium">${getSlotTime('Jumat', 5) || '09.55 – 10.35'}</td>
-                <td class="text-center">${getSlot(k.id, 'Jumat', 5)}</td>
-                <td class="text-center">${getSlot(k.id, 'Sabtu', 5)}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Jumat', 5))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Sabtu', 5))}</td>
               </tr>
 
               <!-- Row 7: JAM VI -->
               <tr>
                 <td class="text-center font-bold">VI</td>
                 <td class="text-center font-medium">${getSlotTime('Senin', 6) || '11.00 – 11.45'}</td>
-                <td class="text-center">${getSlot(k.id, 'Senin', 6)}</td>
-                <td class="text-center">${getSlot(k.id, 'Selasa', 6)}</td>
-                <td class="text-center">${getSlot(k.id, 'Rabu', 6)}</td>
-                <td class="text-center">${getSlot(k.id, 'Kamis', 6)}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Senin', 6))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Selasa', 6))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Rabu', 6))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Kamis', 6))}</td>
                 <td class="text-center font-medium">${getSlotTime('Jumat', 6) || '10.35 – 11.15'}</td>
-                <td class="text-center">${getSlot(k.id, 'Jumat', 6)}</td>
-                <td class="text-center">${getSlot(k.id, 'Sabtu', 6)}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Jumat', 6))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Sabtu', 6))}</td>
               </tr>
 
               <!-- Row 8: Jama'ah Sholat Dzuhur -->
@@ -3576,10 +3735,10 @@ function renderPrintableDocument() {
               <tr>
                 <td class="text-center font-bold">VII</td>
                 <td class="text-center font-medium">${getSlotTime('Senin', 7) || '12.15 – 13.00'}</td>
-                <td class="text-center">${getSlot(k.id, 'Senin', 7)}</td>
-                <td class="text-center">${getSlot(k.id, 'Selasa', 7)}</td>
-                <td class="text-center">${getSlot(k.id, 'Rabu', 7)}</td>
-                <td class="text-center">${getSlot(k.id, 'Kamis', 7)}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Senin', 7))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Selasa', 7))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Rabu', 7))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Kamis', 7))}</td>
                 <td class="text-center font-medium"></td>
                 <td class="text-center"></td>
                 <td class="text-center"></td>
@@ -3589,10 +3748,10 @@ function renderPrintableDocument() {
               <tr>
                 <td class="text-center font-bold">VIII</td>
                 <td class="text-center font-medium">${getSlotTime('Senin', 8) || '13.00 – 13.45'}</td>
-                <td class="text-center">${getSlot(k.id, 'Senin', 8)}</td>
-                <td class="text-center">${getSlot(k.id, 'Selasa', 8)}</td>
-                <td class="text-center">${getSlot(k.id, 'Rabu', 8)}</td>
-                <td class="text-center">${getSlot(k.id, 'Kamis', 8)}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Senin', 8))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Selasa', 8))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Rabu', 8))}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Kamis', 8))}</td>
                 <td class="text-center font-medium"></td>
                 <td class="text-center"></td>
                 <td class="text-center"></td>
@@ -3773,11 +3932,31 @@ async function fetchServerData() {
     if (data.mapel && data.mapel.length > 0) AppState.master.mapel = data.mapel;
     if (data.ruang && data.ruang.length > 0) AppState.master.ruang = data.ruang;
     if (data.waktu && data.waktu.length > 0) AppState.master.waktu = data.waktu;
-    if (data.jadwal && data.jadwal.length > 0) AppState.jadwal = data.jadwal;
+    
+    // Sinkronisasi Jadwal KBM: Jika server ada data, perbarui; jika server kosong tapi lokal punya, simpan lokal ke server
+    if (data.jadwal && data.jadwal.length > 0) {
+      AppState.jadwal = data.jadwal;
+    } else if (AppState.jadwal && AppState.jadwal.length > 0) {
+      saveMatrixChangesToServer();
+    }
+
     if (data.request && data.request.length > 0) AppState.requests = data.request;
     if (data.log && data.log.length > 0) AppState.auditTrail = data.log;
-    if (data.user && data.user.length > 0) AppState.users = data.user;
-    if (data.beban && data.beban.length > 0) AppState.beban = data.beban;
+
+    // Sinkronisasi Akun Pengguna & Hak Akses
+    const serverUsers = data.users || data.user;
+    if (serverUsers && serverUsers.length > 0) {
+      AppState.users = serverUsers;
+    }
+
+    // Sinkronisasi Beban Mengajar
+    const serverBeban = data.beban || data.assignments;
+    if (serverBeban && serverBeban.length > 0) {
+      AppState.beban = serverBeban;
+    } else if (AppState.beban && AppState.beban.length > 0) {
+      apiPost('saveTeachingAssignments', { assignments: AppState.beban });
+    }
+
     if (data.waktu_kelas && data.waktu_kelas.length > 0) AppState.timeConfig.classLimits = data.waktu_kelas;
     if (data.sekolah && data.sekolah.length > 0) {
       AppState.master.sekolah = data.sekolah;
@@ -4243,6 +4422,7 @@ function registerGlobalHandlers() {
   // Revisi 5: Beban Mengajar & Auto-Generator
   window.renderBebanView = renderBebanView;
   window.openAddAssignmentModal = openAddAssignmentModal;
+  window.editAssignmentItem = editAssignmentItem;
   window.closeAssignmentModal = closeAssignmentModal;
   window.updateAssignmentTotalPreview = updateAssignmentTotalPreview;
   window.saveAssignmentItem = saveAssignmentItem;
@@ -4250,6 +4430,10 @@ function registerGlobalHandlers() {
   window.runAutoScheduleGenerator = runAutoScheduleGenerator;
   window.closeGenerateResultModal = closeGenerateResultModal;
   window.applyGeneratedScheduleToMatrix = applyGeneratedScheduleToMatrix;
+
+  // Revisi Cetak & Orientasi & QR Code
+  window.handleOrientationChange = handleOrientationChange;
+  window.updatePrintDocumentQRCode = updatePrintDocumentQRCode;
 }
 
 registerGlobalHandlers();

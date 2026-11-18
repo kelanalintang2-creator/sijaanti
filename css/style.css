@@ -128,25 +128,44 @@ th.sticky-time-col {
   animation: toastSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-/* Cetak SK KBM Resmi (@media print) A4 Landscape */
+/* Cetak SK KBM Resmi (@media print) A4 Landscape & Portrait */
 .table-schedule-preview {
   border-collapse: collapse !important;
   width: 100% !important;
+  table-layout: fixed !important;
   border: 1.5px solid #000000 !important;
 }
 
 .table-schedule-preview th,
 .table-schedule-preview td {
   border: 1px solid #000000 !important;
-  padding: 4px 6px !important;
-  font-size: 10.5px !important;
+  padding: 3px 4px !important;
+  font-size: 10px !important;
   vertical-align: middle !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  height: 30px !important;
+  max-height: 30px !important;
+  line-height: 1.2 !important;
 }
 
 .table-schedule-preview th {
   background-color: #f8fafc !important;
   font-weight: 800 !important;
   text-align: center !important;
+}
+
+/* Shrink to fit cell text container */
+.table-schedule-preview td .shrink-cell {
+  display: block;
+  width: 100%;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  font-size: 9.5px !important;
+  line-height: 1.2 !important;
+  text-align: center;
 }
 
 .table-schedule-preview .cell-break {
@@ -163,6 +182,19 @@ th.sticky-time-col {
   font-weight: 800 !important;
   text-align: center !important;
   letter-spacing: 1px !important;
+}
+
+/* Portrait Mode Styles */
+.print-portrait .table-schedule-preview th,
+.print-portrait .table-schedule-preview td {
+  padding: 2px 2px !important;
+  font-size: 8px !important;
+  height: 25px !important;
+  max-height: 25px !important;
+}
+
+.print-portrait .table-schedule-preview td .shrink-cell {
+  font-size: 7.5px !important;
 }
 
 @media print {
