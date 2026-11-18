@@ -935,7 +935,11 @@ function renderMatrixTable() {
   const clashJadwalIds = new Set(AppState.clashes.map(c => c.jadwalId));
 
   if (mode === 'class') {
-    const dayWaktu = masterWaktu.filter(w => w.hari === AppState.selectedDay);
+    let dayWaktu = masterWaktu.filter(w => w.hari === AppState.selectedDay);
+    if (!dayWaktu || dayWaktu.length === 0) {
+      const cfg = getDayConfigOrDefault(AppState.selectedDay);
+      dayWaktu = generateDayTimeSlots(cfg, AppState.selectedDay).slots;
+    }
     
     let thHtml = `<tr><th class="p-3 sticky-time-col border-r border-border-subtle w-36">Waktu & JP</th>`;
     masterKelas.forEach(k => {
@@ -954,11 +958,13 @@ function renderMatrixTable() {
 
     let tbodyHtml = '';
     dayWaktu.forEach(w => {
+      const sMulai = cleanTimeStr(w.jam_mulai) || '07:00';
+      const sSelesai = cleanTimeStr(w.jam_selesai) || '07:45';
       tbodyHtml += `<tr>`;
       tbodyHtml += `
         <td class="p-2.5 sticky-time-col border-r border-border-subtle bg-slate-50 font-semibold text-text-primary">
           <div class="text-xs font-bold">${w.nama_slot}</div>
-          <div class="text-[10px] text-text-secondary">${w.jam_mulai} - ${w.jam_selesai}</div>
+          <div class="text-[10px] text-text-secondary">${sMulai}–${sSelesai}</div>
         </td>
       `;
 
@@ -967,7 +973,7 @@ function renderMatrixTable() {
           <td colspan="${masterKelas.length}" class="p-3 text-center slot-striped border-r border-border-subtle text-text-muted font-bold tracking-wider uppercase text-[11px]">
             <div class="flex items-center justify-center gap-1.5 text-slate-500">
               <span class="material-symbols-outlined text-[16px]">lock</span>
-              <span>${w.nama_slot} (${w.jam_mulai} - ${w.jam_selesai})</span>
+              <span>${w.nama_slot} (${sMulai}–${sSelesai})</span>
             </div>
           </td>
         `;
@@ -997,10 +1003,12 @@ function renderMatrixTable() {
 
     let tbodyHtml = '';
     for (let jp = 1; jp <= 8; jp++) {
+      const jpTime = getSlotTime('Senin', jp);
       tbodyHtml += `
         <tr>
           <td class="p-2.5 sticky-time-col border-r border-border-subtle bg-slate-50 font-bold text-text-primary text-center">
             <div class="text-xs">JP ${jp}</div>
+            ${jpTime ? `<div class="text-[9px] text-text-secondary font-medium">${jpTime}</div>` : ''}
           </td>
       `;
       days.forEach(d => {
@@ -1028,10 +1036,12 @@ function renderMatrixTable() {
 
     let tbodyHtml = '';
     for (let jp = 1; jp <= 8; jp++) {
+      const jpTime = getSlotTime('Senin', jp);
       tbodyHtml += `
         <tr>
           <td class="p-2.5 sticky-time-col border-r border-border-subtle bg-slate-50 font-bold text-text-primary text-center">
             <div class="text-xs">JP ${jp}</div>
+            ${jpTime ? `<div class="text-[9px] text-text-secondary font-medium">${jpTime}</div>` : ''}
           </td>
       `;
       days.forEach(d => {
@@ -1360,34 +1370,32 @@ function clearCurrentTeacherBlocks() {
   showToast('Semua slot ketersediaan dibuka', 'success');
 }
 
-function applyMitraTemplate() {
+function blockAllTeacherSlots() {
   const teacherSel = document.getElementById('avail-teacher-select');
   if (!teacherSel) return;
   const currentTeacherId = teacherSel.value;
+  const days = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
-  const templateSlots = [
-    { hari: 'Kamis', jp: 5 }, { hari: 'Kamis', jp: 6 }, { hari: 'Kamis', jp: 7 },
-    { hari: 'Sabtu', jp: 1 }, { hari: 'Sabtu', jp: 2 }
-  ];
-
-  templateSlots.forEach(s => {
-    if (!AppState.requests.some(r => r.guru_id === currentTeacherId && r.hari === s.hari && r.jp === s.jp)) {
-      AppState.requests.push({
-        id: `REQ_${currentTeacherId}_${s.hari}_${s.jp}`,
-        guru_id: currentTeacherId,
-        hari: s.hari,
-        jp: s.jp,
-        alasan: 'Penugasan Sekolah Mitra',
-        status: 'Disetujui',
-        timestamp: new Date().toISOString()
-      });
+  days.forEach(d => {
+    for (let jp = 1; jp <= 8; jp++) {
+      if (!AppState.requests.some(r => r.guru_id === currentTeacherId && r.hari === d && parseInt(r.jp) === jp)) {
+        AppState.requests.push({
+          id: `REQ_${currentTeacherId}_${d}_${jp}`,
+          guru_id: currentTeacherId,
+          hari: d,
+          jp: jp,
+          alasan: 'Berhalangan',
+          status: 'Disetujui',
+          timestamp: new Date().toISOString()
+        });
+      }
     }
   });
 
   saveToLocalStorage();
   calculateClashes();
   loadTeacherAvailabilityMatrix();
-  showToast('Template Mitra berhasil diterapkan', 'success');
+  showToast('Semua slot ketersediaan berhasil ditutup (Berhalangan)', 'warning');
 }
 
 // ============================================================================
@@ -1473,9 +1481,14 @@ function renderMasterView() {
             </span>
           </td>
           <td class="p-3 text-right">
-            <button onclick="editMasterItem('guru', '${g.id}')" class="p-1 rounded text-text-secondary hover:text-primary hover:bg-slate-100" title="Edit Guru">
-              <span class="material-symbols-outlined text-[18px]">edit</span>
-            </button>
+            <div class="flex items-center justify-end gap-1">
+              <button onclick="editMasterItem('guru', '${g.id}')" class="p-1 rounded text-text-secondary hover:text-primary hover:bg-slate-100 cursor-pointer" title="Edit Guru">
+                <span class="material-symbols-outlined text-[18px]">edit</span>
+              </button>
+              <button onclick="deleteSingleMasterItem('guru', '${g.id}')" class="p-1 rounded text-text-secondary hover:text-rose-600 hover:bg-slate-100 cursor-pointer" title="Hapus Guru">
+                <span class="material-symbols-outlined text-[18px]">delete</span>
+              </button>
+            </div>
           </td>
         </tr>
       `;
@@ -1492,6 +1505,7 @@ function renderMasterView() {
         <th class="p-3">Tingkat</th>
         <th class="p-3">Wali Kelas</th>
         <th class="p-3 text-center">Jumlah Siswa</th>
+        <th class="p-3 text-right">Aksi</th>
       </tr>
     `;
     const guruMap = {};
@@ -1509,6 +1523,16 @@ function renderMasterView() {
           <td class="p-3 font-semibold text-text-secondary">Kelas ${k.tingkat}</td>
           <td class="p-3 font-medium text-text-primary">${guruMap[k.wali_kelas_id] || '-'}</td>
           <td class="p-3 text-center font-bold text-text-primary">${k.total_siswa || 28} Anak</td>
+          <td class="p-3 text-right">
+            <div class="flex items-center justify-end gap-1">
+              <button onclick="editMasterItem('kelas', '${k.id}')" class="p-1 rounded text-text-secondary hover:text-primary hover:bg-slate-100 cursor-pointer" title="Edit Kelas">
+                <span class="material-symbols-outlined text-[18px]">edit</span>
+              </button>
+              <button onclick="deleteSingleMasterItem('kelas', '${k.id}')" class="p-1 rounded text-text-secondary hover:text-rose-600 hover:bg-slate-100 cursor-pointer" title="Hapus Kelas">
+                <span class="material-symbols-outlined text-[18px]">delete</span>
+              </button>
+            </div>
+          </td>
         </tr>
       `;
     }).join('');
@@ -1523,6 +1547,7 @@ function renderMasterView() {
         <th class="p-3">Nama Mata Pelajaran</th>
         <th class="p-3">Kategori</th>
         <th class="p-3 text-center">Alokasi JP / Minggu</th>
+        <th class="p-3 text-right">Aksi</th>
       </tr>
     `;
     tbody.innerHTML = (AppState.master.mapel || []).map(m => {
@@ -1540,6 +1565,16 @@ function renderMasterView() {
             </span>
           </td>
           <td class="p-3 text-center font-bold text-text-primary">${m.alokasi_jp_minggu} JP</td>
+          <td class="p-3 text-right">
+            <div class="flex items-center justify-end gap-1">
+              <button onclick="editMasterItem('mapel', '${m.id}')" class="p-1 rounded text-text-secondary hover:text-primary hover:bg-slate-100 cursor-pointer" title="Edit Mapel">
+                <span class="material-symbols-outlined text-[18px]">edit</span>
+              </button>
+              <button onclick="deleteSingleMasterItem('mapel', '${m.id}')" class="p-1 rounded text-text-secondary hover:text-rose-600 hover:bg-slate-100 cursor-pointer" title="Hapus Mapel">
+                <span class="material-symbols-outlined text-[18px]">delete</span>
+              </button>
+            </div>
+          </td>
         </tr>
       `;
     }).join('');
@@ -1555,6 +1590,7 @@ function renderMasterView() {
         <th class="p-3">Jenis</th>
         <th class="p-3 text-center">Kapasitas</th>
         <th class="p-3">Fasilitas Penunjang</th>
+        <th class="p-3 text-right">Aksi</th>
       </tr>
     `;
     tbody.innerHTML = (AppState.master.ruang || []).map(r => {
@@ -1569,12 +1605,36 @@ function renderMasterView() {
           <td class="p-3 font-medium text-text-secondary">${r.jenis}</td>
           <td class="p-3 text-center font-bold text-text-primary">${r.kapasitas} Orang</td>
           <td class="p-3 text-text-secondary">${r.fasilitas || '-'}</td>
+          <td class="p-3 text-right">
+            <div class="flex items-center justify-end gap-1">
+              <button onclick="editMasterItem('ruang', '${r.id}')" class="p-1 rounded text-text-secondary hover:text-primary hover:bg-slate-100 cursor-pointer" title="Edit Ruangan">
+                <span class="material-symbols-outlined text-[18px]">edit</span>
+              </button>
+              <button onclick="deleteSingleMasterItem('ruang', '${r.id}')" class="p-1 rounded text-text-secondary hover:text-rose-600 hover:bg-slate-100 cursor-pointer" title="Hapus Ruangan">
+                <span class="material-symbols-outlined text-[18px]">delete</span>
+              </button>
+            </div>
+          </td>
         </tr>
       `;
     }).join('');
   }
 
   updateBulkDeleteButton();
+}
+
+async function deleteSingleMasterItem(tab, id) {
+  if (!confirm(`Hapus data ${tab.toUpperCase()} dengan ID: ${id}?`)) return;
+  AppState.master[tab] = (AppState.master[tab] || []).filter(it => it.id !== id);
+  AppState.selectedMasterIds.delete(id);
+  saveToLocalStorage();
+  renderMasterView();
+  showToast(`Data ${tab.toUpperCase()} (${id}) berhasil dihapus`, 'info');
+
+  const res = await apiPost('batchDeleteMaster', { tab: tab, ids: [id] });
+  if (res && res.success) {
+    showToast(`Data ${tab.toUpperCase()} berhasil dihapus dari Google Sheets!`, 'success');
+  }
 }
 
 function toggleSelectAllMaster(checked) {
@@ -1768,20 +1828,27 @@ async function confirmImportData() {
   renderMasterView();
   showToast(`Berhasil mengimpor ${formattedItems.length} data ke Master ${tab.toUpperCase()}!`, 'success');
 
-  // Kirim batch ke REST API Backend
-  const res = await apiPost('batchImportMaster', { tab: tab, items: formattedItems });
+  // Kirim batch ke REST API Backend (mendukung data.rows dan data.items)
+  const res = await apiPost('batchImportMaster', { tab: tab, rows: formattedItems, items: formattedItems });
   if (res && res.success) {
+    if (res.data && Array.isArray(res.data)) {
+      AppState.master[tab] = res.data;
+      saveToLocalStorage();
+      renderMasterView();
+    }
     showToast(`Sinkronisasi ${formattedItems.length} data ke Google Sheets berhasil!`, 'success');
   }
 }
 
-function openAddMasterModal() {
+function openAddMasterModal(id = null) {
+  AppState._editingMasterId = id;
   const modal = document.getElementById('modal-master-crud');
   const title = document.getElementById('modal-master-title');
   const container = document.getElementById('master-form-fields');
   const tab = AppState.activeMasterTab;
 
-  if (title) title.textContent = `Tambah Data ${tab.toUpperCase()}`;
+  const isEdit = Boolean(id);
+  if (title) title.textContent = `${isEdit ? 'Edit' : 'Tambah'} Data Master ${tab.toUpperCase()}`;
 
   if (container) {
     if (tab === 'guru') {
@@ -1817,8 +1884,91 @@ function openAddMasterModal() {
           </div>
         </div>
       `;
+    } else if (tab === 'kelas') {
+      const guruOptions = (AppState.master.guru || []).map(g => `<option value="${g.id}">${g.nama}${g.gelar ? ', ' + g.gelar : ''}</option>`).join('');
+      container.innerHTML = `
+        <div>
+          <label class="block text-xs font-bold text-text-primary mb-1">Kode Rombel / Kelas:</label>
+          <input type="text" id="crud-kelas-kode" required placeholder="misal: 4A atau X-1" class="w-full text-xs border rounded-lg p-2.5 bg-slate-50"/>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-text-primary mb-1">Nama Rombongan Belajar:</label>
+          <input type="text" id="crud-kelas-nama" required placeholder="misal: Kelas 4A (Garuda)" class="w-full text-xs border rounded-lg p-2.5 bg-slate-50"/>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-text-primary mb-1">Tingkat (1 - 12):</label>
+            <input type="number" id="crud-kelas-tingkat" min="1" max="12" value="4" class="w-full text-xs border rounded-lg p-2.5 bg-slate-50"/>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-text-primary mb-1">Jumlah Siswa:</label>
+            <input type="number" id="crud-kelas-siswa" value="28" class="w-full text-xs border rounded-lg p-2.5 bg-slate-50"/>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-text-primary mb-1">Wali Kelas:</label>
+          <select id="crud-kelas-wali" class="w-full text-xs border rounded-lg p-2.5 bg-slate-50">
+            <option value="">-- Tanpa Wali Kelas --</option>
+            ${guruOptions}
+          </select>
+        </div>
+      `;
+    } else if (tab === 'mapel') {
+      container.innerHTML = `
+        <div>
+          <label class="block text-xs font-bold text-text-primary mb-1">Kode Mata Pelajaran:</label>
+          <input type="text" id="crud-mapel-kode" required placeholder="misal: MTK, IPAS, PAI" class="w-full text-xs border rounded-lg p-2.5 bg-slate-50"/>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-text-primary mb-1">Nama Mata Pelajaran:</label>
+          <input type="text" id="crud-mapel-nama" required placeholder="misal: Matematika" class="w-full text-xs border rounded-lg p-2.5 bg-slate-50"/>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-text-primary mb-1">Kategori:</label>
+            <select id="crud-mapel-kategori" class="w-full text-xs border rounded-lg p-2.5 bg-slate-50">
+              <option value="Wajib">Wajib</option>
+              <option value="Pilihan">Pilihan</option>
+              <option value="Muatan Lokal">Muatan Lokal</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-text-primary mb-1">Alokasi JP / Minggu:</label>
+            <input type="number" id="crud-mapel-alokasi" value="4" min="1" max="10" class="w-full text-xs border rounded-lg p-2.5 bg-slate-50"/>
+          </div>
+        </div>
+      `;
     } else {
-      container.innerHTML = `<div class="p-3 text-xs text-text-secondary">Formulir penambahan data aktif untuk ${tab}.</div>`;
+      container.innerHTML = `
+        <div>
+          <label class="block text-xs font-bold text-text-primary mb-1">Kode Ruang / Fasilitas:</label>
+          <input type="text" id="crud-ruang-kode" required placeholder="misal: RK-4A atau LAB-01" class="w-full text-xs border rounded-lg p-2.5 bg-slate-50"/>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-text-primary mb-1">Nama Fasilitas & Ruangan:</label>
+          <input type="text" id="crud-ruang-nama" required placeholder="misal: Ruang Kelas 4A" class="w-full text-xs border rounded-lg p-2.5 bg-slate-50"/>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-text-primary mb-1">Jenis Ruangan:</label>
+            <select id="crud-ruang-jenis" class="w-full text-xs border rounded-lg p-2.5 bg-slate-50">
+              <option value="Kelas">Kelas</option>
+              <option value="Laboratorium">Laboratorium</option>
+              <option value="Perpustakaan">Perpustakaan</option>
+              <option value="Lapangan">Lapangan</option>
+              <option value="Aula">Aula</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-text-primary mb-1">Kapasitas (Orang):</label>
+            <input type="number" id="crud-ruang-kapasitas" value="32" class="w-full text-xs border rounded-lg p-2.5 bg-slate-50"/>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-text-primary mb-1">Fasilitas Penunjang:</label>
+          <input type="text" id="crud-ruang-fasilitas" placeholder="misal: Papan Tulis, Proyektor, AC" class="w-full text-xs border rounded-lg p-2.5 bg-slate-50"/>
+        </div>
+      `;
     }
   }
 
@@ -1837,24 +1987,44 @@ function closeMasterModal() {
 }
 
 function editMasterItem(type, id) {
-  openAddMasterModal();
+  AppState.activeMasterTab = type;
+  openAddMasterModal(id);
+  
   if (type === 'guru') {
     const g = (AppState.master.guru || []).find(it => it.id === id);
     if (g) {
-      const modalTitle = document.getElementById('modal-master-title');
-      if (modalTitle) modalTitle.textContent = `Edit Data Guru (${g.nama})`;
-      const namaIn = document.getElementById('crud-guru-nama');
-      const gelarIn = document.getElementById('crud-guru-gelar');
-      const nipIn = document.getElementById('crud-guru-nip');
-      const mapelIn = document.getElementById('crud-guru-mapel');
-      const targetIn = document.getElementById('crud-guru-target');
-      const statusIn = document.getElementById('crud-guru-status');
-      if (namaIn) namaIn.value = g.nama || '';
-      if (gelarIn) gelarIn.value = g.gelar || '';
-      if (nipIn) nipIn.value = g.nip || '';
-      if (mapelIn) mapelIn.value = g.mapel_utama || '';
-      if (targetIn) targetIn.value = g.target_jtm || 24;
-      if (statusIn) statusIn.value = g.status_kepegawaian || 'PNS';
+      document.getElementById('crud-guru-nama').value = g.nama || '';
+      document.getElementById('crud-guru-gelar').value = g.gelar || '';
+      document.getElementById('crud-guru-nip').value = g.nip || '';
+      document.getElementById('crud-guru-mapel').value = g.mapel_utama || '';
+      document.getElementById('crud-guru-target').value = g.target_jtm || 24;
+      document.getElementById('crud-guru-status').value = g.status_kepegawaian || 'PNS';
+    }
+  } else if (type === 'kelas') {
+    const k = (AppState.master.kelas || []).find(it => it.id === id);
+    if (k) {
+      document.getElementById('crud-kelas-kode').value = k.kode_kelas || '';
+      document.getElementById('crud-kelas-nama').value = k.nama_rombel || '';
+      document.getElementById('crud-kelas-tingkat').value = k.tingkat || 4;
+      document.getElementById('crud-kelas-siswa').value = k.total_siswa || 28;
+      document.getElementById('crud-kelas-wali').value = k.wali_kelas_id || '';
+    }
+  } else if (type === 'mapel') {
+    const m = (AppState.master.mapel || []).find(it => it.id === id);
+    if (m) {
+      document.getElementById('crud-mapel-kode').value = m.kode || '';
+      document.getElementById('crud-mapel-nama').value = m.nama || '';
+      document.getElementById('crud-mapel-kategori').value = m.kategori || 'Wajib';
+      document.getElementById('crud-mapel-alokasi').value = m.alokasi_jp_minggu || 4;
+    }
+  } else if (type === 'ruang') {
+    const r = (AppState.master.ruang || []).find(it => it.id === id);
+    if (r) {
+      document.getElementById('crud-ruang-kode').value = r.kode || '';
+      document.getElementById('crud-ruang-nama').value = r.nama || '';
+      document.getElementById('crud-ruang-jenis').value = r.jenis || 'Kelas';
+      document.getElementById('crud-ruang-kapasitas').value = r.kapasitas || 32;
+      document.getElementById('crud-ruang-fasilitas').value = r.fasilitas || '';
     }
   }
 }
@@ -1862,28 +2032,89 @@ function editMasterItem(type, id) {
 async function handleMasterSubmit(e) {
   if (e && e.preventDefault) e.preventDefault();
   const tab = AppState.activeMasterTab;
+  const editingId = AppState._editingMasterId;
+
+  let itemData = {};
 
   if (tab === 'guru') {
-    const nama = document.getElementById('crud-guru-nama')?.value || '';
-    const gelar = document.getElementById('crud-guru-gelar')?.value || '';
-    const nip = document.getElementById('crud-guru-nip')?.value || '';
-    const mapel = document.getElementById('crud-guru-mapel')?.value || '';
+    const nama = document.getElementById('crud-guru-nama')?.value?.trim() || '';
+    const gelar = document.getElementById('crud-guru-gelar')?.value?.trim() || '';
+    const nip = document.getElementById('crud-guru-nip')?.value?.trim() || '';
+    const mapel = document.getElementById('crud-guru-mapel')?.value?.trim() || '';
     const target = parseInt(document.getElementById('crud-guru-target')?.value) || 24;
     const status = document.getElementById('crud-guru-status')?.value || 'PNS';
 
-    const newGuru = {
-      id: `G${(AppState.master.guru.length + 1).toString().padStart(2, '0')}`,
+    if (!nama) return showToast('Nama guru wajib diisi!', 'warning');
+
+    itemData = {
+      id: editingId || `G${(AppState.master.guru.length + 1).toString().padStart(2, '0')}`,
       nip, nama, gelar, mapel_utama: mapel, target_jtm: target, status_kepegawaian: status
     };
 
-    AppState.master.guru.push(newGuru);
-    saveToLocalStorage();
-    closeMasterModal();
-    renderMasterView();
-    showToast('Data guru disimpan ke memori & antrean server', 'success');
+  } else if (tab === 'kelas') {
+    const kode = document.getElementById('crud-kelas-kode')?.value?.trim() || '';
+    const nama = document.getElementById('crud-kelas-nama')?.value?.trim() || '';
+    const tingkat = parseInt(document.getElementById('crud-kelas-tingkat')?.value) || 4;
+    const totalSiswa = parseInt(document.getElementById('crud-kelas-siswa')?.value) || 28;
+    const wali = document.getElementById('crud-kelas-wali')?.value || '';
 
-    // Sinkronisasi ke REST API
-    apiPost('saveMaster', { tab: 'guru', item: newGuru });
+    if (!kode || !nama) return showToast('Kode rombel dan nama kelas wajib diisi!', 'warning');
+
+    itemData = {
+      id: editingId || `K${(AppState.master.kelas.length + 1).toString().padStart(2, '0')}`,
+      kode_kelas: kode, nama_rombel: nama, tingkat, total_siswa: totalSiswa, wali_kelas_id: wali
+    };
+
+  } else if (tab === 'mapel') {
+    const kode = document.getElementById('crud-mapel-kode')?.value?.trim() || '';
+    const nama = document.getElementById('crud-mapel-nama')?.value?.trim() || '';
+    const kategori = document.getElementById('crud-mapel-kategori')?.value || 'Wajib';
+    const alokasi = parseInt(document.getElementById('crud-mapel-alokasi')?.value) || 4;
+
+    if (!kode || !nama) return showToast('Kode dan nama mapel wajib diisi!', 'warning');
+
+    itemData = {
+      id: editingId || `M${(AppState.master.mapel.length + 1).toString().padStart(2, '0')}`,
+      kode, nama, kategori, alokasi_jp_minggu: alokasi
+    };
+
+  } else if (tab === 'ruang') {
+    const kode = document.getElementById('crud-ruang-kode')?.value?.trim() || '';
+    const nama = document.getElementById('crud-ruang-nama')?.value?.trim() || '';
+    const jenis = document.getElementById('crud-ruang-jenis')?.value || 'Kelas';
+    const kapasitas = parseInt(document.getElementById('crud-ruang-kapasitas')?.value) || 32;
+    const fasilitas = document.getElementById('crud-ruang-fasilitas')?.value?.trim() || '';
+
+    if (!kode || !nama) return showToast('Kode dan nama ruangan wajib diisi!', 'warning');
+
+    itemData = {
+      id: editingId || `R_${(AppState.master.ruang.length + 1).toString().padStart(2, '0')}`,
+      kode, nama, jenis, kapasitas, fasilitas
+    };
+  }
+
+  // Update State Optimis
+  if (editingId) {
+    const idx = (AppState.master[tab] || []).findIndex(it => it.id === editingId);
+    if (idx >= 0) AppState.master[tab][idx] = itemData;
+  } else {
+    AppState.master[tab].push(itemData);
+  }
+
+  saveToLocalStorage();
+  closeMasterModal();
+  renderMasterView();
+  showToast(`Data ${tab.toUpperCase()} berhasil disimpan!`, 'success');
+
+  // Sinkronisasi ke REST API Backend Google Sheets
+  const res = await apiPost('saveMaster', { tab: tab, item: itemData });
+  if (res && res.success) {
+    if (res.data && Array.isArray(res.data)) {
+      AppState.master[tab] = res.data;
+      saveToLocalStorage();
+      renderMasterView();
+    }
+    showToast(`Data ${tab.toUpperCase()} berhasil disinkronkan ke Google Sheets!`, 'success');
   }
 }
 
@@ -2265,9 +2496,30 @@ async function deleteUser(username) {
 // ============================================================================
 // REVISI 2: PENGATURAN WAKTU, DURASI JP, & ISTIRAHAT DINAMIS
 // ============================================================================
+function cleanTimeStr(val) {
+  if (!val) return '';
+  const s = String(val).trim();
+  if (s.includes('1899') || s.includes('1900') || (s.includes('T') && s.includes('Z'))) {
+    try {
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) {
+        const h = String(d.getHours()).padStart(2, '0');
+        const m = String(d.getMinutes()).padStart(2, '0');
+        return `${h}:${m}`;
+      }
+    } catch (e) {}
+  }
+  const match = s.match(/(\d{1,2})[:.](\d{2})/);
+  if (match) {
+    return `${match[1].padStart(2, '0')}:${match[2]}`;
+  }
+  return s;
+}
+
 function parseTimeToMinutes(timeStr) {
   if (!timeStr) return 7 * 60;
-  const parts = String(timeStr).split(':').map(Number);
+  const clean = cleanTimeStr(timeStr);
+  const parts = String(clean).split(':').map(Number);
   return (parts[0] || 0) * 60 + (parts[1] || 0);
 }
 
@@ -2898,6 +3150,23 @@ function applyGeneratedScheduleToMatrix() {
 // ============================================================================
 function renderExportView() {
   populateExportClassDropdown();
+  populateExportTeacherDropdown();
+  renderPrintableDocument();
+}
+
+function handleExportModeChange() {
+  const mode = document.getElementById('export-mode-select')?.value || 'class';
+  const classWrap = document.getElementById('export-class-filter-wrap');
+  const teacherWrap = document.getElementById('export-teacher-filter-wrap');
+  if (mode === 'teacher') {
+    if (classWrap) classWrap.style.display = 'none';
+    if (teacherWrap) teacherWrap.style.display = 'flex';
+    populateExportTeacherDropdown();
+  } else {
+    if (classWrap) classWrap.style.display = 'flex';
+    if (teacherWrap) teacherWrap.style.display = 'none';
+    populateExportClassDropdown();
+  }
   renderPrintableDocument();
 }
 
@@ -2911,10 +3180,20 @@ function populateExportClassDropdown() {
     classes.map(k => `<option value="${k.id}" ${k.id === currVal ? 'selected' : ''}>${k.nama_rombel || k.kode_kelas}</option>`).join('');
 }
 
+function populateExportTeacherDropdown() {
+  const sel = document.getElementById('export-teacher-select');
+  if (!sel) return;
+  const teachers = AppState.master.guru || [];
+  const currVal = sel.value || 'ALL';
+  sel.innerHTML = `<option value="ALL">Semua Guru</option>` +
+    teachers.map(g => `<option value="${g.id}" ${g.id === currVal ? 'selected' : ''}>${g.nama}${g.gelar ? ', ' + g.gelar : ''}</option>`).join('');
+}
+
 function renderPrintableDocument() {
   const container = document.getElementById('printable-table-container');
   if (!container) return;
 
+  const exportMode = document.getElementById('export-mode-select')?.value || 'class';
   const masterKelas = AppState.master.kelas || [];
   const masterMapel = AppState.master.mapel || [];
   const masterGuru = AppState.master.guru || [];
@@ -2922,6 +3201,7 @@ function renderPrintableDocument() {
 
   const mapelMap = {}; masterMapel.forEach(m => { mapelMap[m.id] = m; });
   const guruMap = {}; masterGuru.forEach(g => { guruMap[g.id] = g; });
+  const kelasMap = {}; masterKelas.forEach(k => { kelasMap[k.id] = k.kode_kelas || k.nama_rombel; });
 
   // Buat mapping kode huruf guru: (A), (B), (C), dst. sesuai standar jadwal kedinasan
   const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
@@ -2930,24 +3210,22 @@ function renderPrintableDocument() {
     teacherCodeMap[g.id] = g.kode || letters[idx % letters.length] || `G${idx + 1}`;
   });
 
-  const filterClass = document.getElementById('export-class-select')?.value || 'ALL';
-  const targetClasses = (filterClass === 'ALL') ? masterKelas : masterKelas.filter(k => k.id === filterClass);
-
-  if (targetClasses.length === 0) {
-    container.innerHTML = `<div class="p-6 text-center text-slate-500 font-semibold">Tidak ada data kelas yang dapat ditampilkan.</div>`;
-    return;
-  }
-
-  // Helper waktu dinamis yang terintegrasi dengan Menu Waktu dan Jam Belajar
+  // Helper waktu dinamis yang terintegrasi dengan Menu Waktu dan Jam Belajar (Bebas dari string 1899)
   const getSlotTime = (dayName, jpNum) => {
     const slot = (AppState.master.waktu || []).find(w => w.hari === dayName && parseInt(w.jp) === jpNum && !w.is_break);
     if (slot && slot.jam_mulai && slot.jam_selesai) {
-      return `${slot.jam_mulai.replace(':', '.')} – ${slot.jam_selesai.replace(':', '.')}`;
+      const start = cleanTimeStr(slot.jam_mulai).replace(':', '.');
+      const end = cleanTimeStr(slot.jam_selesai).replace(':', '.');
+      return `${start} – ${end}`;
     }
     const cfg = getDayConfigOrDefault(dayName);
     const calc = generateDayTimeSlots(cfg, dayName);
     const genSlot = calc.slots.find(s => parseInt(s.jp) === jpNum && !s.is_break);
-    if (genSlot) return `${genSlot.jam_mulai.replace(':', '.')} – ${genSlot.jam_selesai.replace(':', '.')}`;
+    if (genSlot) {
+      const start = cleanTimeStr(genSlot.jam_mulai).replace(':', '.');
+      const end = cleanTimeStr(genSlot.jam_selesai).replace(':', '.');
+      return `${start} – ${end}`;
+    }
     return '';
   };
 
@@ -2955,196 +3233,392 @@ function renderPrintableDocument() {
     const breaks = (AppState.master.waktu || []).filter(w => w.hari === dayName && w.is_break);
     const b = breaks[breakIdx - 1];
     if (b && b.jam_mulai && b.jam_selesai) {
-      return `${b.jam_mulai.replace(':', '.')} – ${b.jam_selesai.replace(':', '.')}`;
+      const start = cleanTimeStr(b.jam_mulai).replace(':', '.');
+      const end = cleanTimeStr(b.jam_selesai).replace(':', '.');
+      return `${start} – ${end}`;
     }
     const cfg = getDayConfigOrDefault(dayName);
     const calc = generateDayTimeSlots(cfg, dayName);
     const genBreaks = calc.slots.filter(s => s.is_break);
     const gb = genBreaks[breakIdx - 1];
-    if (gb) return `${gb.jam_mulai.replace(':', '.')} – ${gb.jam_selesai.replace(':', '.')}`;
+    if (gb) {
+      const start = cleanTimeStr(gb.jam_mulai).replace(':', '.');
+      const end = cleanTimeStr(gb.jam_selesai).replace(':', '.');
+      return `${start} – ${end}`;
+    }
     return '';
-  };
-
-  // Helper untuk mendapatkan teks isi slot ({KODE_GURU}) {MAPEL}
-  const getSlot = (kId, day, jp) => {
-    const item = jadwal.find(it => it.hari === day && parseInt(it.jp) === jp && it.kelas_id === kId);
-    if (!item) return '';
-    const tCode = teacherCodeMap[item.guru_id] || '';
-    const m = mapelMap[item.mapel_id];
-    const mName = m ? (m.nama || m.kode) : item.mapel_id;
-    return tCode ? `(${tCode}) ${mName}` : mName;
   };
 
   let html = '';
 
-  targetClasses.forEach((k, kIdx) => {
-    const className = k.nama_rombel || k.kode_kelas;
-    html += `
-      <div class="class-schedule-block mb-8 page-break-inside-avoid">
-        <div class="text-sm font-black text-slate-900 tracking-wide uppercase mb-1.5 flex items-center justify-between">
-          <span>KELAS ${className}</span>
-          <span class="text-xs text-slate-500 font-bold no-print">Rombel ${k.kode_kelas}</span>
+  if (exportMode === 'teacher') {
+    // =========================================================================
+    // MODE PRATINJAU JADWAL PER GURU (Sesuai Gambar 3)
+    // Format: 9 Kolom (JAM, WAKTU PELAJARAN, SENIN-KAMIS, WAKTU JUM'AT, JUM'AT, SABTU)
+    // Isi Cell: {KODE_KELAS} {NAMA_MAPEL} (contoh: XI-1 Ekonomi)
+    // =========================================================================
+    const filterTeacher = document.getElementById('export-teacher-select')?.value || 'ALL';
+    const targetTeachers = (filterTeacher === 'ALL') ? masterGuru : masterGuru.filter(g => g.id === filterTeacher);
+
+    if (targetTeachers.length === 0) {
+      container.innerHTML = `<div class="p-6 text-center text-slate-500 font-semibold">Tidak ada data guru yang dapat ditampilkan.</div>`;
+      return;
+    }
+
+    const getTeacherCell = (gId, day, jp) => {
+      const item = jadwal.find(it => it.guru_id === gId && it.hari === day && parseInt(it.jp) === jp);
+      if (!item) return '';
+      const kCode = kelasMap[item.kelas_id] || item.kelas_id;
+      const m = mapelMap[item.mapel_id];
+      const mName = m ? (m.nama || m.kode) : item.mapel_id;
+      return `${kCode} ${mName}`;
+    };
+
+    targetTeachers.forEach(g => {
+      const teacherTitle = `${g.nama}${g.gelar ? ', ' + g.gelar : ''}`;
+      html += `
+        <div class="class-schedule-block mb-8 page-break-inside-avoid">
+          <div class="text-sm font-black text-slate-900 tracking-wide uppercase mb-1.5 flex items-center justify-between">
+            <span>${teacherTitle}</span>
+            <span class="text-xs text-slate-500 font-bold no-print">NIP: ${g.nip || '-'}</span>
+          </div>
+
+          <table class="table-schedule-preview">
+            <thead>
+              <tr>
+                <th style="width: 45px;">JAM</th>
+                <th style="width: 105px;">WAKTU<br>PELAJARAN</th>
+                <th style="width: 110px;">SENIN</th>
+                <th style="width: 110px;">SELASA</th>
+                <th style="width: 110px;">RABU</th>
+                <th style="width: 110px;">KAMIS</th>
+                <th style="width: 105px;">WAKTU<br>PELAJARAN</th>
+                <th style="width: 110px;">JUM'AT</th>
+                <th style="width: 110px;">SABTU</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Row 1: JAM I -->
+              <tr>
+                <td class="text-center font-bold">I</td>
+                <td class="text-center font-medium">${getSlotTime('Senin', 1) || '07.00 – 07.45'}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Senin', 1)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Selasa', 1)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Rabu', 1)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Kamis', 1)}</td>
+                <td class="text-center font-medium">${getSlotTime('Jumat', 1) || '07.00 – 07.40'}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Jumat', 1)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Sabtu', 1) || 'Istighosah'}</td>
+              </tr>
+
+              <!-- Row 2: JAM II -->
+              <tr>
+                <td class="text-center font-bold">II</td>
+                <td class="text-center font-medium">${getSlotTime('Senin', 2) || '07.45 – 08.30'}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Senin', 2)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Selasa', 2)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Rabu', 2)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Kamis', 2)}</td>
+                <td class="text-center font-medium">${getSlotTime('Jumat', 2) || '07.40 – 08.20'}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Jumat', 2)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Sabtu', 2)}</td>
+              </tr>
+
+              <!-- Row 3: JAM III -->
+              <tr>
+                <td class="text-center font-bold">III</td>
+                <td class="text-center font-medium">${getSlotTime('Senin', 3) || '08.30 – 09.15'}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Senin', 3)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Selasa', 3)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Rabu', 3)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Kamis', 3)}</td>
+                <td class="text-center font-medium">${getSlotTime('Jumat', 3) || '08.20 – 09.00'}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Jumat', 3)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Sabtu', 3)}</td>
+              </tr>
+
+              <!-- Row 4: Istirahat -->
+              <tr>
+                <td class="text-center font-bold"></td>
+                <td class="text-center font-medium">${getBreakTime('Senin', 1) || '09.15 – 09.30'}</td>
+                <td colspan="4" class="cell-break">I s t i r a h a t</td>
+                <td class="text-center font-medium">${getSlotTime('Jumat', 4) || '09.00 – 09.40'}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Jumat', 4)}</td>
+                <td class="cell-break">Istirahat</td>
+              </tr>
+
+              <!-- Row 5: JAM IV -->
+              <tr>
+                <td class="text-center font-bold">IV</td>
+                <td class="text-center font-medium">${getSlotTime('Senin', 4) || '09.30 – 10.15'}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Senin', 4)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Selasa', 4)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Rabu', 4)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Kamis', 4)}</td>
+                <td class="text-center font-medium">${getBreakTime('Jumat', 1) || '09.40 – 09.55'}</td>
+                <td class="cell-break">Istirahat</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Sabtu', 4)}</td>
+              </tr>
+
+              <!-- Row 6: JAM V -->
+              <tr>
+                <td class="text-center font-bold">V</td>
+                <td class="text-center font-medium">${getSlotTime('Senin', 5) || '10.15 – 11.00'}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Senin', 5)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Selasa', 5)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Rabu', 5)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Kamis', 5)}</td>
+                <td class="text-center font-medium">${getSlotTime('Jumat', 5) || '09.55 – 10.35'}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Jumat', 5)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Sabtu', 5)}</td>
+              </tr>
+
+              <!-- Row 7: JAM VI -->
+              <tr>
+                <td class="text-center font-bold">VI</td>
+                <td class="text-center font-medium">${getSlotTime('Senin', 6) || '11.00 – 11.45'}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Senin', 6)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Selasa', 6)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Rabu', 6)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Kamis', 6)}</td>
+                <td class="text-center font-medium">${getSlotTime('Jumat', 6) || '10.35 – 11.15'}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Jumat', 6)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Sabtu', 6)}</td>
+              </tr>
+
+              <!-- Row 8: Jama'ah Sholat Dzuhur -->
+              <tr>
+                <td class="text-center font-bold"></td>
+                <td class="text-center font-medium">${getBreakTime('Senin', 2) || '11.45 – 12.15'}</td>
+                <td colspan="4" class="cell-dzuhur">Jama'ah Sholat Dzuhur</td>
+                <td class="text-center font-medium"></td>
+                <td class="text-center font-bold"></td>
+                <td class="cell-dzuhur">Sholat Dzuhur</td>
+              </tr>
+
+              <!-- Row 9: JAM VII -->
+              <tr>
+                <td class="text-center font-bold">VII</td>
+                <td class="text-center font-medium">${getSlotTime('Senin', 7) || '12.15 – 13.00'}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Senin', 7)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Selasa', 7)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Rabu', 7)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Kamis', 7)}</td>
+                <td class="text-center font-medium"></td>
+                <td class="text-center font-bold"></td>
+                <td class="text-center font-bold"></td>
+              </tr>
+
+              <!-- Row 10: JAM VIII -->
+              <tr>
+                <td class="text-center font-bold">VIII</td>
+                <td class="text-center font-medium">${getSlotTime('Senin', 8) || '13.00 – 13.45'}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Senin', 8)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Selasa', 8)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Rabu', 8)}</td>
+                <td class="text-center font-bold">${getTeacherCell(g.id, 'Kamis', 8)}</td>
+                <td class="text-center font-medium"></td>
+                <td class="text-center font-bold"></td>
+                <td class="text-center font-bold"></td>
+              </tr>
+            </tbody>
+          </table>
         </div>
+      `;
+    });
 
-        <table class="table-schedule-preview">
-          <thead>
-            <tr>
-              <th style="width: 45px;">JAM</th>
-              <th style="width: 105px;">WAKTU<br>PELAJARAN</th>
-              <th style="width: 110px;">SENIN</th>
-              <th style="width: 110px;">SELASA</th>
-              <th style="width: 110px;">RABU</th>
-              <th style="width: 110px;">KAMIS</th>
-              <th style="width: 105px;">WAKTU<br>PELAJARAN</th>
-              <th style="width: 110px;">JUM'AT</th>
-              <th style="width: 110px;">SABTU</th>
-            </tr>
-          </thead>
-          <tbody>
-            <!-- Row 1: JAM I -->
-            <tr>
-              <td class="text-center font-bold">I</td>
-              <td class="text-center font-medium">${getSlotTime('Senin', 1) || '07.00 – 07.45'}</td>
-              <td class="text-center">${getSlot(k.id, 'Senin', 1)}</td>
-              <td class="text-center">${getSlot(k.id, 'Selasa', 1)}</td>
-              <td class="text-center">${getSlot(k.id, 'Rabu', 1)}</td>
-              <td class="text-center">${getSlot(k.id, 'Kamis', 1)}</td>
-              <td class="text-center font-medium">${getSlotTime('Jumat', 1) || '07.00 – 07.40'}</td>
-              <td class="text-center">${getSlot(k.id, 'Jumat', 1)}</td>
-              <td class="text-center">${getSlot(k.id, 'Sabtu', 1) || 'Istighosah'}</td>
-            </tr>
+  } else {
+    // =========================================================================
+    // MODE PRATINJAU JADWAL PER KELAS / ROMBEL (Sesuai Gambar 2)
+    // Format: 9 Kolom (JAM, WAKTU PELAJARAN, SENIN-KAMIS, WAKTU JUM'AT, JUM'AT, SABTU)
+    // Isi Cell: ({KODE_GURU}) {NAMA_MAPEL} (contoh: (O) Penjasorkes)
+    // =========================================================================
+    const filterClass = document.getElementById('export-class-select')?.value || 'ALL';
+    const targetClasses = (filterClass === 'ALL') ? masterKelas : masterKelas.filter(k => k.id === filterClass);
 
-            <!-- Row 2: JAM II -->
-            <tr>
-              <td class="text-center font-bold">II</td>
-              <td class="text-center font-medium">${getSlotTime('Senin', 2) || '07.45 – 08.30'}</td>
-              <td class="text-center">${getSlot(k.id, 'Senin', 2)}</td>
-              <td class="text-center">${getSlot(k.id, 'Selasa', 2)}</td>
-              <td class="text-center">${getSlot(k.id, 'Rabu', 2)}</td>
-              <td class="text-center">${getSlot(k.id, 'Kamis', 2)}</td>
-              <td class="text-center font-medium">${getSlotTime('Jumat', 2) || '07.40 – 08.20'}</td>
-              <td class="text-center">${getSlot(k.id, 'Jumat', 2)}</td>
-              <td class="text-center">${getSlot(k.id, 'Sabtu', 2)}</td>
-            </tr>
+    if (targetClasses.length === 0) {
+      container.innerHTML = `<div class="p-6 text-center text-slate-500 font-semibold">Tidak ada data kelas yang dapat ditampilkan.</div>`;
+      return;
+    }
 
-            <!-- Row 3: JAM III -->
-            <tr>
-              <td class="text-center font-bold">III</td>
-              <td class="text-center font-medium">${getSlotTime('Senin', 3) || '08.30 – 09.15'}</td>
-              <td class="text-center">${getSlot(k.id, 'Senin', 3)}</td>
-              <td class="text-center">${getSlot(k.id, 'Selasa', 3)}</td>
-              <td class="text-center">${getSlot(k.id, 'Rabu', 3)}</td>
-              <td class="text-center">${getSlot(k.id, 'Kamis', 3)}</td>
-              <td class="text-center font-medium">${getSlotTime('Jumat', 3) || '08.20 – 09.00'}</td>
-              <td class="text-center">${getSlot(k.id, 'Jumat', 3)}</td>
-              <td class="text-center">${getSlot(k.id, 'Sabtu', 3)}</td>
-            </tr>
+    const getSlot = (kId, day, jp) => {
+      const item = jadwal.find(it => it.hari === day && parseInt(it.jp) === jp && it.kelas_id === kId);
+      if (!item) return '';
+      const tCode = teacherCodeMap[item.guru_id] || '';
+      const m = mapelMap[item.mapel_id];
+      const mName = m ? (m.nama || m.kode) : item.mapel_id;
+      return tCode ? `(${tCode}) ${mName}` : mName;
+    };
 
-            <!-- Row 4: Istirahat Senin-Kamis & Sabtu | JP 4 Jum'at -->
-            <tr>
-              <td class="text-center font-bold"></td>
-              <td class="text-center font-medium">${getBreakTime('Senin', 1) || '09.15 – 09.30'}</td>
-              <td colspan="4" class="cell-break">I s t i r a h a t</td>
-              <td class="text-center font-medium">${getSlotTime('Jumat', 4) || '09.00 – 09.40'}</td>
-              <td class="text-center">${getSlot(k.id, 'Jumat', 4)}</td>
-              <td class="cell-break">Istirahat</td>
-            </tr>
+    targetClasses.forEach(k => {
+      const className = k.nama_rombel || k.kode_kelas;
+      html += `
+        <div class="class-schedule-block mb-8 page-break-inside-avoid">
+          <div class="text-sm font-black text-slate-900 tracking-wide uppercase mb-1.5 flex items-center justify-between">
+            <span>KELAS ${className}</span>
+            <span class="text-xs text-slate-500 font-bold no-print">Rombel ${k.kode_kelas}</span>
+          </div>
 
-            <!-- Row 5: JAM IV Senin-Kamis & Sabtu | Istirahat Jum'at -->
-            <tr>
-              <td class="text-center font-bold">IV</td>
-              <td class="text-center font-medium">${getSlotTime('Senin', 4) || '09.30 – 10.15'}</td>
-              <td class="text-center">${getSlot(k.id, 'Senin', 4)}</td>
-              <td class="text-center">${getSlot(k.id, 'Selasa', 4)}</td>
-              <td class="text-center">${getSlot(k.id, 'Rabu', 4)}</td>
-              <td class="text-center">${getSlot(k.id, 'Kamis', 4)}</td>
-              <td class="text-center font-medium">${getBreakTime('Jumat', 1) || '09.40 – 09.55'}</td>
-              <td class="cell-break">Istirahat</td>
-              <td class="text-center">${getSlot(k.id, 'Sabtu', 4)}</td>
-            </tr>
+          <table class="table-schedule-preview">
+            <thead>
+              <tr>
+                <th style="width: 45px;">JAM</th>
+                <th style="width: 105px;">WAKTU<br>PELAJARAN</th>
+                <th style="width: 110px;">SENIN</th>
+                <th style="width: 110px;">SELASA</th>
+                <th style="width: 110px;">RABU</th>
+                <th style="width: 110px;">KAMIS</th>
+                <th style="width: 105px;">WAKTU<br>PELAJARAN</th>
+                <th style="width: 110px;">JUM'AT</th>
+                <th style="width: 110px;">SABTU</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Row 1: JAM I -->
+              <tr>
+                <td class="text-center font-bold">I</td>
+                <td class="text-center font-medium">${getSlotTime('Senin', 1) || '07.00 – 07.45'}</td>
+                <td class="text-center">${getSlot(k.id, 'Senin', 1)}</td>
+                <td class="text-center">${getSlot(k.id, 'Selasa', 1)}</td>
+                <td class="text-center">${getSlot(k.id, 'Rabu', 1)}</td>
+                <td class="text-center">${getSlot(k.id, 'Kamis', 1)}</td>
+                <td class="text-center font-medium">${getSlotTime('Jumat', 1) || '07.00 – 07.40'}</td>
+                <td class="text-center">${getSlot(k.id, 'Jumat', 1)}</td>
+                <td class="text-center">${getSlot(k.id, 'Sabtu', 1) || 'Istighosah'}</td>
+              </tr>
 
-            <!-- Row 6: JAM V -->
-            <tr>
-              <td class="text-center font-bold">V</td>
-              <td class="text-center font-medium">${getSlotTime('Senin', 5) || '10.15 – 11.00'}</td>
-              <td class="text-center">${getSlot(k.id, 'Senin', 5)}</td>
-              <td class="text-center">${getSlot(k.id, 'Selasa', 5)}</td>
-              <td class="text-center">${getSlot(k.id, 'Rabu', 5)}</td>
-              <td class="text-center">${getSlot(k.id, 'Kamis', 5)}</td>
-              <td class="text-center font-medium">${getSlotTime('Jumat', 5) || '09.55 – 10.35'}</td>
-              <td class="text-center">${getSlot(k.id, 'Jumat', 5)}</td>
-              <td class="text-center">${getSlot(k.id, 'Sabtu', 5)}</td>
-            </tr>
+              <!-- Row 2: JAM II -->
+              <tr>
+                <td class="text-center font-bold">II</td>
+                <td class="text-center font-medium">${getSlotTime('Senin', 2) || '07.45 – 08.30'}</td>
+                <td class="text-center">${getSlot(k.id, 'Senin', 2)}</td>
+                <td class="text-center">${getSlot(k.id, 'Selasa', 2)}</td>
+                <td class="text-center">${getSlot(k.id, 'Rabu', 2)}</td>
+                <td class="text-center">${getSlot(k.id, 'Kamis', 2)}</td>
+                <td class="text-center font-medium">${getSlotTime('Jumat', 2) || '07.40 – 08.20'}</td>
+                <td class="text-center">${getSlot(k.id, 'Jumat', 2)}</td>
+                <td class="text-center">${getSlot(k.id, 'Sabtu', 2)}</td>
+              </tr>
 
-            <!-- Row 7: JAM VI -->
-            <tr>
-              <td class="text-center font-bold">VI</td>
-              <td class="text-center font-medium">${getSlotTime('Senin', 6) || '11.00 – 11.45'}</td>
-              <td class="text-center">${getSlot(k.id, 'Senin', 6)}</td>
-              <td class="text-center">${getSlot(k.id, 'Selasa', 6)}</td>
-              <td class="text-center">${getSlot(k.id, 'Rabu', 6)}</td>
-              <td class="text-center">${getSlot(k.id, 'Kamis', 6)}</td>
-              <td class="text-center font-medium">${getSlotTime('Jumat', 6) || '10.35 – 11.15'}</td>
-              <td class="text-center">${getSlot(k.id, 'Jumat', 6)}</td>
-              <td class="text-center">${getSlot(k.id, 'Sabtu', 6)}</td>
-            </tr>
+              <!-- Row 3: JAM III -->
+              <tr>
+                <td class="text-center font-bold">III</td>
+                <td class="text-center font-medium">${getSlotTime('Senin', 3) || '08.30 – 09.15'}</td>
+                <td class="text-center">${getSlot(k.id, 'Senin', 3)}</td>
+                <td class="text-center">${getSlot(k.id, 'Selasa', 3)}</td>
+                <td class="text-center">${getSlot(k.id, 'Rabu', 3)}</td>
+                <td class="text-center">${getSlot(k.id, 'Kamis', 3)}</td>
+                <td class="text-center font-medium">${getSlotTime('Jumat', 3) || '08.20 – 09.00'}</td>
+                <td class="text-center">${getSlot(k.id, 'Jumat', 3)}</td>
+                <td class="text-center">${getSlot(k.id, 'Sabtu', 3)}</td>
+              </tr>
 
-            <!-- Row 8: Jama'ah Sholat Dzuhur -->
-            <tr>
-              <td class="text-center font-bold"></td>
-              <td class="text-center font-medium">${getBreakTime('Senin', 2) || '11.45 – 12.15'}</td>
-              <td colspan="4" class="cell-dzuhur">Jama'ah Sholat Dzuhur</td>
-              <td class="text-center font-medium"></td>
-              <td class="text-center"></td>
-              <td class="cell-dzuhur">Sholat Dzuhur</td>
-            </tr>
+              <!-- Row 4: Istirahat -->
+              <tr>
+                <td class="text-center font-bold"></td>
+                <td class="text-center font-medium">${getBreakTime('Senin', 1) || '09.15 – 09.30'}</td>
+                <td colspan="4" class="cell-break">I s t i r a h a t</td>
+                <td class="text-center font-medium">${getSlotTime('Jumat', 4) || '09.00 – 09.40'}</td>
+                <td class="text-center">${getSlot(k.id, 'Jumat', 4)}</td>
+                <td class="cell-break">Istirahat</td>
+              </tr>
 
-            <!-- Row 9: JAM VII -->
-            <tr>
-              <td class="text-center font-bold">VII</td>
-              <td class="text-center font-medium">${getSlotTime('Senin', 7) || '12.15 – 13.00'}</td>
-              <td class="text-center">${getSlot(k.id, 'Senin', 7)}</td>
-              <td class="text-center">${getSlot(k.id, 'Selasa', 7)}</td>
-              <td class="text-center">${getSlot(k.id, 'Rabu', 7)}</td>
-              <td class="text-center">${getSlot(k.id, 'Kamis', 7)}</td>
-              <td class="text-center font-medium"></td>
-              <td class="text-center"></td>
-              <td class="text-center"></td>
-            </tr>
+              <!-- Row 5: JAM IV -->
+              <tr>
+                <td class="text-center font-bold">IV</td>
+                <td class="text-center font-medium">${getSlotTime('Senin', 4) || '09.30 – 10.15'}</td>
+                <td class="text-center">${getSlot(k.id, 'Senin', 4)}</td>
+                <td class="text-center">${getSlot(k.id, 'Selasa', 4)}</td>
+                <td class="text-center">${getSlot(k.id, 'Rabu', 4)}</td>
+                <td class="text-center">${getSlot(k.id, 'Kamis', 4)}</td>
+                <td class="text-center font-medium">${getBreakTime('Jumat', 1) || '09.40 – 09.55'}</td>
+                <td class="cell-break">Istirahat</td>
+                <td class="text-center">${getSlot(k.id, 'Sabtu', 4)}</td>
+              </tr>
 
-            <!-- Row 10: JAM VIII -->
-            <tr>
-              <td class="text-center font-bold">VIII</td>
-              <td class="text-center font-medium">${getSlotTime('Senin', 8) || '13.00 – 13.45'}</td>
-              <td class="text-center">${getSlot(k.id, 'Senin', 8)}</td>
-              <td class="text-center">${getSlot(k.id, 'Selasa', 8)}</td>
-              <td class="text-center">${getSlot(k.id, 'Rabu', 8)}</td>
-              <td class="text-center">${getSlot(k.id, 'Kamis', 8)}</td>
-              <td class="text-center font-medium"></td>
-              <td class="text-center"></td>
-              <td class="text-center"></td>
-            </tr>
-          </tbody>
-        </table>
+              <!-- Row 6: JAM V -->
+              <tr>
+                <td class="text-center font-bold">V</td>
+                <td class="text-center font-medium">${getSlotTime('Senin', 5) || '10.15 – 11.00'}</td>
+                <td class="text-center">${getSlot(k.id, 'Senin', 5)}</td>
+                <td class="text-center">${getSlot(k.id, 'Selasa', 5)}</td>
+                <td class="text-center">${getSlot(k.id, 'Rabu', 5)}</td>
+                <td class="text-center">${getSlot(k.id, 'Kamis', 5)}</td>
+                <td class="text-center font-medium">${getSlotTime('Jumat', 5) || '09.55 – 10.35'}</td>
+                <td class="text-center">${getSlot(k.id, 'Jumat', 5)}</td>
+                <td class="text-center">${getSlot(k.id, 'Sabtu', 5)}</td>
+              </tr>
+
+              <!-- Row 7: JAM VI -->
+              <tr>
+                <td class="text-center font-bold">VI</td>
+                <td class="text-center font-medium">${getSlotTime('Senin', 6) || '11.00 – 11.45'}</td>
+                <td class="text-center">${getSlot(k.id, 'Senin', 6)}</td>
+                <td class="text-center">${getSlot(k.id, 'Selasa', 6)}</td>
+                <td class="text-center">${getSlot(k.id, 'Rabu', 6)}</td>
+                <td class="text-center">${getSlot(k.id, 'Kamis', 6)}</td>
+                <td class="text-center font-medium">${getSlotTime('Jumat', 6) || '10.35 – 11.15'}</td>
+                <td class="text-center">${getSlot(k.id, 'Jumat', 6)}</td>
+                <td class="text-center">${getSlot(k.id, 'Sabtu', 6)}</td>
+              </tr>
+
+              <!-- Row 8: Jama'ah Sholat Dzuhur -->
+              <tr>
+                <td class="text-center font-bold"></td>
+                <td class="text-center font-medium">${getBreakTime('Senin', 2) || '11.45 – 12.15'}</td>
+                <td colspan="4" class="cell-dzuhur">Jama'ah Sholat Dzuhur</td>
+                <td class="text-center font-medium"></td>
+                <td class="text-center"></td>
+                <td class="cell-dzuhur">Sholat Dzuhur</td>
+              </tr>
+
+              <!-- Row 9: JAM VII -->
+              <tr>
+                <td class="text-center font-bold">VII</td>
+                <td class="text-center font-medium">${getSlotTime('Senin', 7) || '12.15 – 13.00'}</td>
+                <td class="text-center">${getSlot(k.id, 'Senin', 7)}</td>
+                <td class="text-center">${getSlot(k.id, 'Selasa', 7)}</td>
+                <td class="text-center">${getSlot(k.id, 'Rabu', 7)}</td>
+                <td class="text-center">${getSlot(k.id, 'Kamis', 7)}</td>
+                <td class="text-center font-medium"></td>
+                <td class="text-center"></td>
+                <td class="text-center"></td>
+              </tr>
+
+              <!-- Row 10: JAM VIII -->
+              <tr>
+                <td class="text-center font-bold">VIII</td>
+                <td class="text-center font-medium">${getSlotTime('Senin', 8) || '13.00 – 13.45'}</td>
+                <td class="text-center">${getSlot(k.id, 'Senin', 8)}</td>
+                <td class="text-center">${getSlot(k.id, 'Selasa', 8)}</td>
+                <td class="text-center">${getSlot(k.id, 'Rabu', 8)}</td>
+                <td class="text-center">${getSlot(k.id, 'Kamis', 8)}</td>
+                <td class="text-center font-medium"></td>
+                <td class="text-center"></td>
+                <td class="text-center"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      `;
+    });
+
+    // Tambahkan Keterangan Kode Guru Pengampu di bawah tabel
+    html += `
+      <div class="mt-6 pt-4 border-t-2 border-slate-900 text-[11px] text-slate-800 page-break-inside-avoid">
+        <div class="font-black text-xs uppercase mb-2">Keterangan Kode Guru Pengampu:</div>
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-4 gap-y-1">
+          ${masterGuru.map(g => `
+            <div>
+              <span class="font-extrabold text-blue-900">(${teacherCodeMap[g.id]})</span>
+              <span class="font-medium">${g.nama}${g.gelar ? ', ' + g.gelar : ''}</span>
+              <span class="text-slate-500 text-[10px]">(${g.mapel_utama || '-'})</span>
+            </div>
+          `).join('')}
+        </div>
       </div>
     `;
-  });
-
-  // Tambahkan Keterangan Kode Guru Pengampu di bawah tabel
-  html += `
-    <div class="mt-6 pt-4 border-t-2 border-slate-900 text-[11px] text-slate-800 page-break-inside-avoid">
-      <div class="font-black text-xs uppercase mb-2">Keterangan Kode Guru Pengampu:</div>
-      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-4 gap-y-1">
-        ${masterGuru.map(g => `
-          <div>
-            <span class="font-extrabold text-blue-900">(${teacherCodeMap[g.id]})</span>
-            <span class="font-medium">${g.nama}${g.gelar ? ', ' + g.gelar : ''}</span>
-            <span class="text-slate-500 text-[10px]">(${g.mapel_utama || '-'})</span>
-          </div>
-        `).join('')}
-      </div>
-    </div>
-  `;
+  }
 
   container.innerHTML = html;
 }
@@ -3713,6 +4187,10 @@ function registerGlobalHandlers() {
   window.loadTeacherAvailabilityMatrix = loadTeacherAvailabilityMatrix;
   window.toggleTeacherSlotAvailability = toggleTeacherSlotAvailability;
   window.clearCurrentTeacherBlocks = clearCurrentTeacherBlocks;
+  window.blockAllTeacherSlots = blockAllTeacherSlots;
+  window.deleteSingleMasterItem = deleteSingleMasterItem;
+  window.handleExportModeChange = handleExportModeChange;
+  window.populateExportTeacherDropdown = populateExportTeacherDropdown;
   window.applyMitraTemplate = applyMitraTemplate;
   window.saveAvailabilityToServer = saveAvailabilityToServer;
   window.setMasterTab = setMasterTab;
