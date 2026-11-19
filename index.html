@@ -830,6 +830,41 @@
               </div>
             </div>
           </div>
+
+          <!-- REVISI 5: JADWAL KEGIATAN KHUSUS (ISTIGHOSAH, UPACARA, SENAM, KEAGAMAAN) -->
+          <div class="bg-surface-card rounded-2xl p-6 elevation-card border border-purple-200 space-y-4">
+            <div class="flex items-center justify-between flex-wrap gap-2 border-b border-purple-100 pb-3">
+              <div>
+                <h3 class="font-extrabold text-sm text-purple-950 flex items-center gap-2">
+                  <span class="material-symbols-outlined text-purple-600 text-[22px]">event_repeat</span>
+                  <span>Jadwal Kegiatan Khusus (Keagamaan, Istighosah, Upacara, Senam, dll.)</span>
+                </h3>
+                <p class="text-xs text-purple-800 mt-0.5">Kegiatan terjadwal rutin di Hari & JP tertentu yang otomatis masuk ke Matriks & Pratinjau KBM serta dikunci agar tidak dapat dimasuki jadwal mapel lain.</p>
+              </div>
+              <button type="button" onclick="openKegiatanKhususModal()" class="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all cursor-pointer">
+                <span class="material-symbols-outlined text-[16px]">add</span>
+                <span>Tambah Kegiatan Khusus</span>
+              </button>
+            </div>
+
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-xs">
+                <thead class="bg-purple-50 text-purple-900 font-bold border-b border-purple-200">
+                  <tr>
+                    <th class="p-2.5">Nama Kegiatan</th>
+                    <th class="p-2.5">Hari</th>
+                    <th class="p-2.5">Jam Pelajaran (JP)</th>
+                    <th class="p-2.5">Rombel / Kelas Berlaku</th>
+                    <th class="p-2.5">Keterangan</th>
+                    <th class="p-2.5 text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody id="kegiatan-khusus-tbody" class="divide-y divide-purple-100">
+                  <!-- Dynamically populated -->
+                </tbody>
+              </table>
+            </div>
+          </div>
         </section>
 
         <!-- =========================================================================
@@ -1278,6 +1313,74 @@
         <div class="pt-4 border-t border-border-subtle flex items-center justify-end gap-2">
           <button type="button" onclick="closePriorityModal()" class="px-3.5 py-2 rounded-lg text-xs font-semibold text-text-secondary hover:bg-slate-100 cursor-pointer">Batal</button>
           <button type="button" onclick="savePrioritySubjectSubmit()" class="px-4 py-2 rounded-lg text-xs font-bold bg-purple-700 text-white hover:bg-purple-800 shadow-sm cursor-pointer">Simpan Aturan Prioritas</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL REVISI 5: ATUR JADWAL KEGIATAN KHUSUS (ISTIGHOSAH, UPACARA, SENAM, DLL.) -->
+  <div id="modal-kegiatan-khusus" style="display: none;" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 items-center justify-center p-4">
+    <div class="bg-surface-card rounded-2xl elevation-modal max-w-lg w-full overflow-hidden border border-border-subtle">
+      <div class="bg-gradient-to-r from-purple-700 to-indigo-700 px-6 py-4 text-white flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="material-symbols-outlined text-[22px]">event_repeat</span>
+          <h3 class="font-bold text-base" id="modal-kk-title">Atur Jadwal Kegiatan Khusus</h3>
+        </div>
+        <button type="button" onclick="closeKegiatanKhususModal()" class="text-white/80 hover:text-white p-1 cursor-pointer">
+          <span class="material-symbols-outlined text-[20px]">close</span>
+        </button>
+      </div>
+
+      <div class="p-6 space-y-3.5 text-xs">
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">Nama Kegiatan Khusus:</label>
+          <input type="text" id="kk-nama" required placeholder="Contoh: Istighosah / Keagamaan, Upacara Bendera, Senam" class="w-full border rounded-lg p-2.5 bg-slate-50 font-bold text-slate-900">
+        </div>
+
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">Hari Pelaksanaan:</label>
+          <select id="kk-hari" class="w-full border rounded-lg p-2.5 bg-slate-50 font-bold text-slate-900 cursor-pointer">
+            <option value="Senin">Senin</option>
+            <option value="Selasa">Selasa</option>
+            <option value="Rabu">Rabu</option>
+            <option value="Kamis">Kamis</option>
+            <option value="Jumat">Jumat</option>
+            <option value="Sabtu" selected>Sabtu</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">Jam Pelajaran (JP) yang Dikunci:</label>
+          <div class="grid grid-cols-4 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200" id="kk-jp-checkboxes">
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="0" class="kk-jp-chk"> <span>JP 0</span></label>
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="1" class="kk-jp-chk" checked> <span>JP 1</span></label>
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="2" class="kk-jp-chk"> <span>JP 2</span></label>
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="3" class="kk-jp-chk"> <span>JP 3</span></label>
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="4" class="kk-jp-chk"> <span>JP 4</span></label>
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="5" class="kk-jp-chk"> <span>JP 5</span></label>
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="6" class="kk-jp-chk"> <span>JP 6</span></label>
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="7" class="kk-jp-chk"> <span>JP 7</span></label>
+          </div>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block font-bold text-slate-700">Rombel / Kelas Berlaku:</label>
+            <button type="button" onclick="toggleAllKkClasses()" class="text-[11px] font-bold text-purple-700 hover:underline cursor-pointer">Centang Semua Kelas</button>
+          </div>
+          <div class="grid grid-cols-3 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200 max-h-32 overflow-y-auto" id="kk-kelas-checkboxes">
+            <!-- Dynamically populated from master kelas -->
+          </div>
+        </div>
+
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">Keterangan / Catatan:</label>
+          <input type="text" id="kk-keterangan" placeholder="Contoh: Pembiasaan Keagamaan di Lapangan Sekolah" class="w-full border rounded-lg p-2.5 bg-slate-50 text-xs">
+        </div>
+
+        <div class="pt-4 border-t border-border-subtle flex items-center justify-end gap-2">
+          <button type="button" onclick="closeKegiatanKhususModal()" class="px-3.5 py-2 rounded-lg text-xs font-semibold text-text-secondary hover:bg-slate-100 cursor-pointer">Batal</button>
+          <button type="button" onclick="saveKegiatanKhususSubmit()" class="px-4 py-2 rounded-lg text-xs font-bold bg-purple-700 text-white hover:bg-purple-800 shadow-sm cursor-pointer">Simpan Kegiatan Khusus</button>
         </div>
       </div>
     </div>

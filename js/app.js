@@ -103,11 +103,18 @@ function resetInactivityTimer() {
 }
 
 function initActivityListeners() {
-  // Cegah logout saat refresh: sebelum unload simpan timestamp sekarang
-  window.addEventListener('beforeunload', () => {
+  // Cegah logout saat refresh / tutup tab / ganti aplikasi: simpan timestamp aktif
+  const saveActive = () => {
     if (AppState.isLoggedIn) {
       SafeStorage.set('SIJAANTI_LAST_ACTIVE', String(Date.now()));
     }
+  };
+
+  window.addEventListener('beforeunload', saveActive);
+  window.addEventListener('pagehide', saveActive);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') saveActive();
+    else if (AppState.isLoggedIn) recordUserActivity();
   });
 
   ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'].forEach(evt => {
@@ -145,6 +152,7 @@ const AppState = {
   users: [],
   beban: [],
   mapelPrioritas: [], // REVISI 2: Aturan Mapel Prioritas & Slot Khusus
+  kegiatanKhusus: [], // REVISI 5: Jadwal Kegiatan Khusus (Istighosah, Upacara, Senam, dll.)
   timeConfig: {
     days: {},
     classLimits: []
@@ -302,25 +310,36 @@ function hideInstallUI() {
 document.addEventListener('DOMContentLoaded', bootApplication);
 
 function bootApplication() {
-  registerGlobalHandlers();
-  initPWA();
-  loadFromLocalStorage();
-  checkAuthSession();
-  loadSchoolIdentity(); // Sinkronkan identitas sekolah & logo ke seluruh elemen tampilan awal
-  populateLoginTeacherDropdown();
-  calculateClashes();
+  try {
+    registerGlobalHandlers();
+    initPWA();
+    loadFromLocalStorage();
+    checkAuthSession();
+    loadSchoolIdentity(); // Sinkronkan identitas sekolah & logo ke seluruh elemen tampilan awal
+    populateLoginTeacherDropdown();
+    calculateClashes();
 
-  if (AppState.isLoggedIn) {
-    showAppLayout();
-    setupRoleUI();
-    initActivityListeners();
-    navigateView(AppState.activeView || 'dashboard');
-  } else {
-    showLoginLayout();
+    if (AppState.isLoggedIn) {
+      showAppLayout();
+      setupRoleUI();
+      initActivityListeners();
+      try {
+        navigateView(AppState.activeView || 'dashboard');
+      } catch (err) {
+        console.error('Error navigating view on boot:', err);
+      }
+    } else {
+      showLoginLayout();
+    }
+
+    // Tarik data terbaru dari backend REST API di background (SWR)
+    fetchServerData();
+  } catch (globalBootErr) {
+    console.error('Critical boot error:', globalBootErr);
+    if (AppState.isLoggedIn) {
+      showAppLayout();
+    }
   }
-
-  // Tarik data terbaru dari backend REST API di background (SWR)
-  fetchServerData();
 }
 
 function checkAuthSession() {
@@ -334,7 +353,7 @@ function checkAuthSession() {
       const sess = JSON.parse(sessionRaw);
       if (sess && sess.isLoggedIn && sess.user) {
         // Cek apakah tidak aktif selama lebih dari 10 menit
-        const lastTime = lastActive || sess.timestamp || 0;
+        const lastTime = lastActive > 0 ? lastActive : (sess.timestamp || now);
         if (lastTime > 0 && (now - lastTime) > INACTIVITY_TIMEOUT_MS) {
           console.warn('⚠️ Sesi kedaluwarsa setelah 10 menit inaktivitas.');
           SafeStorage.remove(APP_CONFIG.STORAGE_KEY_AUTH);
@@ -351,7 +370,9 @@ function checkAuthSession() {
         recordUserActivity();
         return;
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn('Session parse error:', e);
+    }
   }
   AppState.isLoggedIn = false;
 }
@@ -976,6 +997,60 @@ function renderAuditTrail() {
 // ============================================================================
 // 9. SCHEDULING MATRIX INTERACTIVE CONTROLLER (Sempurnakan 1 Kelas Penuh & Mode Guru)
 // ============================================================================
+// ----------------------------------------------------------------------------
+// HELPER FORMAT WAKTU & KEGIATAN KHUSUS (TERHUBUNG KE CONFIG WAKTU & PRATINJAU)
+// ----------------------------------------------------------------------------
+function getSlotTime(dayName, jpNum) {
+  const slot = (AppState.master.waktu || []).find(w => w.hari === dayName && parseInt(w.jp) === jpNum && !w.is_break);
+  if (slot && slot.jam_mulai && slot.jam_selesai) {
+    const start = cleanTimeStr(slot.jam_mulai).replace(':', '.');
+    const end = cleanTimeStr(slot.jam_selesai).replace(':', '.');
+    return `${start} – ${end}`;
+  }
+  const cfg = getDayConfigOrDefault(dayName);
+  const calc = generateDayTimeSlots(cfg, dayName);
+  const genSlot = calc.slots.find(s => parseInt(s.jp) === jpNum && !s.is_break);
+  if (genSlot) {
+    const start = cleanTimeStr(genSlot.jam_mulai).replace(':', '.');
+    const end = cleanTimeStr(genSlot.jam_selesai).replace(':', '.');
+    return `${start} – ${end}`;
+  }
+  return '';
+}
+
+function getBreakTime(dayName, breakIdx) {
+  const breaks = (AppState.master.waktu || []).filter(w => w.hari === dayName && w.is_break);
+  const b = breaks[breakIdx - 1];
+  if (b && b.jam_mulai && b.jam_selesai) {
+    const start = cleanTimeStr(b.jam_mulai).replace(':', '.');
+    const end = cleanTimeStr(b.jam_selesai).replace(':', '.');
+    return `${start} – ${end}`;
+  }
+  const cfg = getDayConfigOrDefault(dayName);
+  const calc = generateDayTimeSlots(cfg, dayName);
+  const genBreaks = calc.slots.filter(s => s.is_break);
+  const gb = genBreaks[breakIdx - 1];
+  if (gb) {
+    const start = cleanTimeStr(gb.jam_mulai).replace(':', '.');
+    const end = cleanTimeStr(gb.jam_selesai).replace(':', '.');
+    return `${start} – ${end}`;
+  }
+  return '';
+}
+
+function findKegiatanKhususForSlot(hari, jp, kelasId = null) {
+  const list = AppState.kegiatanKhusus || [];
+  return list.find(k => {
+    if (k.hari !== hari) return false;
+    const jps = parseClassIds(k.jp).map(Number);
+    if (!jps.includes(parseInt(jp))) return false;
+    if (!kelasId) return true;
+    const kList = parseClassIds(k.kelas_ids);
+    if (kList.includes('ALL') || kList.length === 0 || kList.includes(kelasId)) return true;
+    return false;
+  });
+}
+
 function setMatrixMode(mode) {
   if (mode === 'class') mode = 'single-class';
   AppState.matrixMode = mode;
@@ -1168,6 +1243,24 @@ function renderMatrixTable() {
 }
 
 function renderMatrixCell(item, hari, jp, kelasId, hasClash, mapelMap, guruMap) {
+  // Cek apakah slot ini dikunci untuk Kegiatan Khusus (Istighosah, Keagamaan, Upacara, dll)
+  const kk = findKegiatanKhususForSlot(hari, jp, kelasId);
+  if (kk) {
+    return `
+      <div class="h-20 bg-purple-50/90 border-2 border-purple-300 rounded-xl p-2 flex flex-col justify-between shadow-xs select-none">
+        <div class="flex items-start justify-between gap-1">
+          <span class="text-[11px] font-black text-purple-900 leading-tight truncate">${kk.nama_kegiatan}</span>
+          <span class="material-symbols-outlined text-[16px] text-purple-600">stars</span>
+        </div>
+        <div class="text-[9.5px] text-purple-700 font-semibold truncate">${kk.keterangan || 'Kegiatan Rutin'}</div>
+        <div class="flex items-center justify-between text-[9px] font-bold text-purple-900 border-t border-purple-200/60 pt-1">
+          <span class="px-1.5 py-0.2 rounded bg-purple-200 text-purple-900">TERKUNCI</span>
+          <span class="text-[9px] text-purple-600">Khusus</span>
+        </div>
+      </div>
+    `;
+  }
+
   if (!item || !item.mapel_id) {
     return `
       <div onclick="openPlotModal('${hari}', ${jp}, '${kelasId}')" class="h-20 border border-dashed border-slate-300 rounded-xl p-2 bg-white hover:bg-blue-50/50 hover:border-primary/50 transition-all cursor-pointer flex flex-col items-center justify-center text-text-muted group">
@@ -1215,6 +1308,11 @@ function renderMatrixCell(item, hari, jp, kelasId, hasClash, mapelMap, guruMap) 
 // 10. MODAL SLOT PLOTTING HANDLERS
 // ============================================================================
 function openPlotModal(hari, jp, kelasId, existingJadwalId) {
+  const kk = findKegiatanKhususForSlot(hari, jp, kelasId);
+  if (kk) {
+    return showToast(`Slot ${hari} JP ${jp} dikunci untuk kegiatan khusus: ${kk.nama_kegiatan}`, 'warning');
+  }
+
   AppState.activeSlotEdit = { hari, jp, kelasId, id: existingJadwalId };
   
   const modal = document.getElementById('modal-plot-slot');
@@ -2846,6 +2944,183 @@ function renderTimeConfigView() {
       `;
     }).join('');
   }
+
+  // REVISI 5: Render Tabel Jadwal Kegiatan Khusus (Keagamaan, Upacara, dll.)
+  renderKegiatanKhususTable();
+}
+
+// ============================================================================
+// REVISI 5: CRUD JADWAL KEGIATAN KHUSUS (ISTIGHOSAH, UPACARA, SENAM, DLL.)
+// ============================================================================
+function renderKegiatanKhususTable() {
+  const tbody = document.getElementById('kegiatan-khusus-tbody');
+  if (!tbody) return;
+
+  const list = AppState.kegiatanKhusus || [];
+  if (list.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-slate-500">Belum ada jadwal kegiatan khusus. Klik <strong>Tambah Kegiatan Khusus</strong> untuk menambahkan kegiatan seperti Istighosah, Upacara, Senam, dll.</td></tr>`;
+    return;
+  }
+
+  const kelasMap = {};
+  (AppState.master.kelas || []).forEach(k => { kelasMap[k.id] = k.nama_rombel || k.kode_kelas; });
+
+  tbody.innerHTML = list.map(item => {
+    const jpPills = (item.jp || []).map(j => `<span class="px-2 py-0.5 rounded bg-purple-100 text-purple-900 font-bold text-[10px] mr-1">JP ${j}</span>`).join('');
+    
+    let kelasDisplay = '';
+    const kList = parseClassIds(item.kelas_ids || []);
+    if (item.kelas_ids === 'ALL' || kList.length === 0 || kList.length >= (AppState.master.kelas || []).length) {
+      kelasDisplay = '<span class="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-extrabold text-[10px]">Semua Kelas</span>';
+    } else {
+      kelasDisplay = kList.map(kid => `<span class="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-bold text-[10px] mr-1">${kelasMap[kid] || kid}</span>`).join('');
+    }
+
+    return `
+      <tr class="hover:bg-purple-50/50 transition-colors">
+        <td class="p-2.5 font-bold text-purple-950 flex items-center gap-1.5">
+          <span class="material-symbols-outlined text-[16px] text-purple-600">stars</span>
+          <span>${item.nama_kegiatan}</span>
+        </td>
+        <td class="p-2.5 font-bold text-slate-800">${item.hari}</td>
+        <td class="p-2.5">${jpPills || '<span class="text-slate-400">JP 1</span>'}</td>
+        <td class="p-2.5">${kelasDisplay}</td>
+        <td class="p-2.5 text-slate-600 text-[11px]">${item.keterangan || '-'}</td>
+        <td class="p-2.5 text-right whitespace-nowrap">
+          <button type="button" onclick="openKegiatanKhususModal('${item.id}')" class="p-1 rounded text-purple-700 hover:text-purple-900 hover:bg-purple-100 cursor-pointer mr-1" title="Edit">
+            <span class="material-symbols-outlined text-[18px]">edit</span>
+          </button>
+          <button type="button" onclick="deleteKegiatanKhusus('${item.id}')" class="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-slate-100 cursor-pointer" title="Hapus">
+            <span class="material-symbols-outlined text-[18px]">delete</span>
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function openKegiatanKhususModal(id = null) {
+  AppState._editingKegiatanKhususId = id;
+  const modal = document.getElementById('modal-kegiatan-khusus');
+  const titleEl = document.getElementById('modal-kk-title');
+  const nameInput = document.getElementById('kk-nama');
+  const hariSelect = document.getElementById('kk-hari');
+  const kelasContainer = document.getElementById('kk-kelas-checkboxes');
+  const ketInput = document.getElementById('kk-keterangan');
+
+  if (titleEl) titleEl.textContent = id ? 'Edit Jadwal Kegiatan Khusus' : 'Tambah Jadwal Kegiatan Khusus';
+
+  const existing = id ? (AppState.kegiatanKhusus || []).find(k => k.id === id) : null;
+  const existingClasses = existing ? parseClassIds(existing.kelas_ids) : [];
+  const isAll = !existing || existing.kelas_ids === 'ALL' || existingClasses.length === 0;
+
+  if (nameInput) nameInput.value = existing ? existing.nama_kegiatan : '';
+  if (hariSelect) hariSelect.value = existing ? existing.hari : 'Sabtu';
+  if (ketInput) ketInput.value = existing ? (existing.keterangan || '') : '';
+
+  // Checkboxes JP
+  const targetJps = existing ? (existing.jp || []).map(Number) : [1];
+  document.querySelectorAll('#kk-jp-checkboxes .kk-jp-chk').forEach(chk => {
+    chk.checked = targetJps.includes(parseInt(chk.value));
+  });
+
+  // Checkboxes Kelas
+  if (kelasContainer) {
+    kelasContainer.innerHTML = (AppState.master.kelas || []).map(k => `
+      <label class="flex items-center gap-1.5 p-1 rounded hover:bg-white cursor-pointer">
+        <input type="checkbox" value="${k.id}" class="kk-kelas-chk" ${isAll || existingClasses.includes(k.id) ? 'checked' : ''}>
+        <span class="font-bold text-slate-800 text-xs">${k.kode_kelas}</span>
+      </label>
+    `).join('');
+  }
+
+  if (modal) {
+    modal.style.display = 'flex';
+    modal.classList.remove('hidden');
+  }
+}
+
+function closeKegiatanKhususModal() {
+  const modal = document.getElementById('modal-kegiatan-khusus');
+  if (modal) {
+    modal.style.display = 'none';
+    modal.classList.add('hidden');
+  }
+  AppState._editingKegiatanKhususId = null;
+}
+
+function toggleAllKkClasses() {
+  const chks = document.querySelectorAll('#kk-kelas-checkboxes .kk-kelas-chk');
+  const allChecked = Array.from(chks).every(c => c.checked);
+  chks.forEach(c => { c.checked = !allChecked; });
+}
+
+function saveKegiatanKhususSubmit() {
+  const nama = document.getElementById('kk-nama')?.value?.trim();
+  const hari = document.getElementById('kk-hari')?.value;
+  const ket = document.getElementById('kk-keterangan')?.value?.trim() || '';
+
+  if (!nama) return showToast('Nama kegiatan khusus wajib diisi!', 'warning');
+
+  const selectedJps = [];
+  document.querySelectorAll('#kk-jp-checkboxes .kk-jp-chk:checked').forEach(c => selectedJps.push(parseInt(c.value)));
+  if (selectedJps.length === 0) return showToast('Pilih minimal satu Jam Pelajaran (JP)!', 'warning');
+
+  const selectedClasses = [];
+  document.querySelectorAll('#kk-kelas-checkboxes .kk-kelas-chk:checked').forEach(c => selectedClasses.push(c.value));
+  if (selectedClasses.length === 0) return showToast('Pilih minimal satu rombel / kelas!', 'warning');
+
+  const allClassesCount = (AppState.master.kelas || []).length;
+  const finalClassIds = (selectedClasses.length >= allClassesCount) ? 'ALL' : selectedClasses;
+
+  if (!AppState.kegiatanKhusus) AppState.kegiatanKhusus = [];
+
+  if (AppState._editingKegiatanKhususId) {
+    const idx = AppState.kegiatanKhusus.findIndex(k => k.id === AppState._editingKegiatanKhususId);
+    if (idx >= 0) {
+      AppState.kegiatanKhusus[idx] = {
+        ...AppState.kegiatanKhusus[idx],
+        nama_kegiatan: nama,
+        hari: hari,
+        jp: selectedJps,
+        kelas_ids: finalClassIds,
+        keterangan: ket
+      };
+      showToast('Jadwal Kegiatan Khusus berhasil diperbarui!', 'success');
+    }
+  } else {
+    AppState.kegiatanKhusus.push({
+      id: `KK_${Date.now()}`,
+      nama_kegiatan: nama,
+      hari: hari,
+      jp: selectedJps,
+      kelas_ids: finalClassIds,
+      keterangan: ket
+    });
+    showToast('Jadwal Kegiatan Khusus berhasil ditambahkan!', 'success');
+  }
+
+  AppState._editingKegiatanKhususId = null;
+  saveToLocalStorage();
+  closeKegiatanKhususModal();
+  renderKegiatanKhususTable();
+  renderMatrixTable();
+  if (typeof renderPrintableDocument === 'function') renderPrintableDocument();
+
+  // Sinkronkan ke database spreadsheet via REST API
+  apiPost('saveKegiatanKhusus', { kegiatan: AppState.kegiatanKhusus });
+}
+
+function deleteKegiatanKhusus(id) {
+  if (!confirm('Hapus jadwal kegiatan khusus ini?')) return;
+  AppState.kegiatanKhusus = (AppState.kegiatanKhusus || []).filter(k => k.id !== id);
+  saveToLocalStorage();
+  renderKegiatanKhususTable();
+  renderMatrixTable();
+  if (typeof renderPrintableDocument === 'function') renderPrintableDocument();
+  showToast('Jadwal Kegiatan Khusus berhasil dihapus!', 'info');
+
+  apiPost('saveKegiatanKhusus', { kegiatan: AppState.kegiatanKhusus });
 }
 
 function recalcDaySchedule(d) {
@@ -3286,6 +3561,9 @@ function savePrioritySubjectSubmit() {
   saveToLocalStorage();
   closePriorityModal();
   renderPrioritySubjects();
+
+  // Sinkronkan ke database spreadsheet via REST API
+  apiPost('saveMapelPrioritas', { prioritas: AppState.mapelPrioritas });
 }
 
 function deletePrioritySubject(id) {
@@ -3294,6 +3572,9 @@ function deletePrioritySubject(id) {
   saveToLocalStorage();
   renderPrioritySubjects();
   showToast('Aturan prioritas berhasil dihapus!', 'info');
+
+  // Sinkronkan ke database spreadsheet via REST API
+  apiPost('saveMapelPrioritas', { prioritas: AppState.mapelPrioritas });
 }
 
 // ----------------------------------------------------------------------------
@@ -3604,8 +3885,25 @@ function runAutoScheduleGenerator() {
   const classDayJpCount = {};   // `${day}_${kelasId}` -> count
   const groupPlacedDays = {};   // `${groupKey}` -> Set(days)
   const teacherSlotsByDay = {}; // `${day}_${guruId}` -> [jp, jp]
+  const teacherMapelsByDay = {}; // `${day}_${guruId}` -> { [jp]: mapelId } (REVISI 4)
   const generatedSchedule = [];
   const unplacedTasks = [];
+
+  // REVISI 5: KUNCI SLOT UNTUK KEGIATAN KHUSUS (Istighosah, Upacara, Senam, Keagamaan)
+  // Tidak dapat dimasuki jadwal pelajaran reguler apapun!
+  (AppState.kegiatanKhusus || []).forEach(kk => {
+    const h = kk.hari;
+    const jps = (kk.jp || []).map(Number);
+    const kList = (kk.kelas_ids === 'ALL' || (Array.isArray(kk.kelas_ids) && kk.kelas_ids.includes('ALL')) || !kk.kelas_ids || kk.kelas_ids.length === 0)
+      ? (AppState.master.kelas || []).map(k => k.id)
+      : parseClassIds(kk.kelas_ids);
+
+    jps.forEach(jp => {
+      kList.forEach(kId => {
+        occupiedClass[`${h}_${jp}_${kId}`] = true;
+      });
+    });
+  });
 
   // Helper penempatan task ke jadwal
   function tryPlaceTask(task, allowSameDay = false) {
@@ -3661,17 +3959,29 @@ function runAutoScheduleGenerator() {
 
         if (!isBlockValid) continue;
 
+        // REVISI 4: 1 Guru Mengajar Mapel Berbeda (masing-masing 2 JP)
+        // JANGAN dipetakan 4 JP berurutan; pisahkan 2 JP!
+        const teacherDayKey = `${day}_${task.guruId}`;
+        const existingTeacherMapels = teacherMapelsByDay[teacherDayKey] || {};
+        const hasAdjacentDiffMapel = blockJps.some(jp => {
+          const prevM = existingTeacherMapels[jp - 1];
+          const nextM = existingTeacherMapels[jp + 1];
+          return (prevM && prevM !== task.mapelId) || (nextM && nextM !== task.mapelId);
+        });
+        if (hasAdjacentDiffMapel) {
+          continue; // Tolak opsi ini agar tidak berurutan 4 JP beda mapel
+        }
+
         // Hitung Skor Pedagogis:
         // 1. Kedekatan / Kumpul Jam Guru yang sama (minimalkan jam kosong/idle)
         let score = 100;
-        const teacherDayKey = `${day}_${task.guruId}`;
         const existingTeacherJps = teacherSlotsByDay[teacherDayKey] || [];
 
         if (existingTeacherJps.length > 0) {
           const firstBlockJp = blockJps[0];
           const lastBlockJp = blockJps[blockJps.length - 1];
 
-          // Cek apakah langsung bersambung dengan jam mengajar guru sebelumnya di hari yang sama
+          // Cek apakah langsung bersambung dengan jam mengajar guru sebelumnya di hari yang sama (khusus mapel sama)
           const isImmediatelyAdjacent = existingTeacherJps.some(ejp => ejp === firstBlockJp - 1 || ejp === lastBlockJp + 1);
           if (isImmediatelyAdjacent) {
             score += 60; // Sangat disukai: jam guru berkumpul berurutan
@@ -3706,6 +4016,9 @@ function runAutoScheduleGenerator() {
 
         if (!teacherSlotsByDay[teacherDayKey]) teacherSlotsByDay[teacherDayKey] = [];
         teacherSlotsByDay[teacherDayKey].push(jp);
+
+        if (!teacherMapelsByDay[teacherDayKey]) teacherMapelsByDay[teacherDayKey] = {};
+        teacherMapelsByDay[teacherDayKey][jp] = task.mapelId;
 
         generatedSchedule.push({
           id: `GEN_${task.kelasId}_${day}_${jp}`,
@@ -3779,6 +4092,9 @@ function runAutoScheduleGenerator() {
   // Kirim data ke backend Google Sheets secara asinkron
   saveMatrixChangesToServer();
 
+  // REVISI 6: Notifikasi Selesai & Arahan Cek Rekap Catatan
+  showToast('✅ Generate Jadwal Selesai! Silakan cek rekap catatan.', 'success', 6000);
+
   // Tampilkan Modal Hasil Generate & Rekomendasi Lengkap
   showGenerateResultModal(tasks.length, generatedSchedule.length, unplacedTasks, reports);
 }
@@ -3791,6 +4107,11 @@ function showGenerateResultModal(totalTasks, placedSlots, unplacedTasks, reports
   const unplacedList = document.getElementById('gen-unplaced-list');
   const emptyModalList = document.getElementById('gen-modal-empty-slots-list');
   const headerEl = document.getElementById('gen-modal-header');
+  const titleEl = document.getElementById('gen-modal-title');
+
+  if (titleEl) {
+    titleEl.textContent = 'Generate Jadwal Selesai! Silakan Cek Rekap Catatan';
+  }
 
   const totalDemandJp = placedSlots + unplacedTasks.reduce((sum, t) => sum + t.blockSize, 0);
   const successPercent = totalDemandJp > 0 ? Math.round((placedSlots / totalDemandJp) * 100) : 100;
@@ -4052,6 +4373,8 @@ function renderPrintableDocument() {
     }
 
     const getTeacherCell = (gId, day, jp) => {
+      const kk = findKegiatanKhususForSlot(day, jp, null);
+      if (kk) return kk.nama_kegiatan;
       const item = jadwal.find(it => it.guru_id === gId && it.hari === day && parseInt(it.jp) === jp);
       if (!item) return '';
       const kCode = kelasMap[item.kelas_id] || item.kelas_id;
@@ -4097,7 +4420,7 @@ function renderPrintableDocument() {
                 <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Kamis', 1))}</td>
                 <td class="text-center font-medium">${getSlotTime('Jumat', 1) || '07.00 – 07.40'}</td>
                 <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Jumat', 1))}</td>
-                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Sabtu', 1) || 'Istighosah')}</td>
+                <td class="text-center font-bold">${wrapShrink(getTeacherCell(g.id, 'Sabtu', 1))}</td>
               </tr>
 
               <!-- Row 2: JAM II -->
@@ -4231,6 +4554,8 @@ function renderPrintableDocument() {
     }
 
     const getSlot = (kId, day, jp) => {
+      const kk = findKegiatanKhususForSlot(day, jp, kId);
+      if (kk) return kk.nama_kegiatan;
       const item = jadwal.find(it => it.hari === day && parseInt(it.jp) === jp && it.kelas_id === kId);
       if (!item) return '';
       const tCode = teacherCodeMap[item.guru_id] || '';
@@ -4276,7 +4601,7 @@ function renderPrintableDocument() {
                 <td class="text-center">${wrapShrink(getSlot(k.id, 'Kamis', 1))}</td>
                 <td class="text-center font-medium">${getSlotTime('Jumat', 1) || '07.00 – 07.40'}</td>
                 <td class="text-center">${wrapShrink(getSlot(k.id, 'Jumat', 1))}</td>
-                <td class="text-center">${wrapShrink(getSlot(k.id, 'Sabtu', 1) || 'Istighosah')}</td>
+                <td class="text-center">${wrapShrink(getSlot(k.id, 'Sabtu', 1))}</td>
               </tr>
 
               <!-- Row 2: JAM II -->
@@ -4686,6 +5011,30 @@ async function fetchServerData() {
       apiPost('saveTeachingAssignments', { assignments: AppState.beban });
     }
 
+    // Sinkronisasi Mapel Prioritas & Kegiatan Khusus dari Database Spreadsheet
+    const serverPrio = data.prioritas || data.mapel_prioritas;
+    if (serverPrio && serverPrio.length > 0) {
+      AppState.mapelPrioritas = serverPrio.map(p => ({
+        ...p,
+        hari: parseClassIds(p.hari),
+        jp: parseClassIds(p.jp).map(Number),
+        kelas_ids: parseClassIds(p.kelas_ids)
+      }));
+    } else if (AppState.mapelPrioritas && AppState.mapelPrioritas.length > 0) {
+      apiPost('saveMapelPrioritas', { prioritas: AppState.mapelPrioritas });
+    }
+
+    const serverKK = data.kegiatan_khusus || data.kegiatan;
+    if (serverKK && serverKK.length > 0) {
+      AppState.kegiatanKhusus = serverKK.map(k => ({
+        ...k,
+        jp: parseClassIds(k.jp).map(Number),
+        kelas_ids: parseClassIds(k.kelas_ids)
+      }));
+    } else if (AppState.kegiatanKhusus && AppState.kegiatanKhusus.length > 0) {
+      apiPost('saveKegiatanKhusus', { kegiatan: AppState.kegiatanKhusus });
+    }
+
     if (data.waktu_kelas && data.waktu_kelas.length > 0) AppState.timeConfig.classLimits = data.waktu_kelas;
     if (data.sekolah && data.sekolah.length > 0) {
       AppState.master.sekolah = data.sekolah;
@@ -4715,6 +5064,7 @@ function saveToLocalStorage() {
     users: AppState.users,
     beban: AppState.beban,
     mapelPrioritas: AppState.mapelPrioritas,
+    kegiatanKhusus: AppState.kegiatanKhusus,
     timeConfig: AppState.timeConfig,
     schoolLogoBase64: AppState.schoolLogoBase64,
     savedAt: Date.now()
@@ -4734,6 +5084,7 @@ function loadFromLocalStorage() {
         AppState.users = parsed.users || [];
         AppState.beban = parsed.beban || [];
         AppState.mapelPrioritas = parsed.mapelPrioritas || [];
+        AppState.kegiatanKhusus = parsed.kegiatanKhusus || [];
         AppState.timeConfig = parsed.timeConfig || { days: {}, classLimits: [] };
         AppState.schoolLogoBase64 = parsed.schoolLogoBase64 || null;
         if (AppState.users.length === 0) seedDefaultUsersAndBeban();
@@ -4806,6 +5157,32 @@ function seedDefaultUsersAndBeban() {
       keterangan: 'PJOK Lapangan'
     }
   ];
+
+  if (!AppState.mapelPrioritas || AppState.mapelPrioritas.length === 0) {
+    AppState.mapelPrioritas = [
+      {
+        id: 'PRIO_01',
+        mapel_id: 'M07', // PJOK
+        hari: ['Senin', 'Selasa', 'Rabu', 'Kamis'],
+        jp: [1, 2, 3], // JP pagi saja
+        kelas_ids: ['K07', 'K08', 'K09', 'K10'],
+        keterangan: 'Olahraga outdoor wajib pagi hari (JP 1-3)'
+      }
+    ];
+  }
+
+  if (!AppState.kegiatanKhusus || AppState.kegiatanKhusus.length === 0) {
+    AppState.kegiatanKhusus = [
+      {
+        id: 'KK_01',
+        nama_kegiatan: 'Istighosah',
+        hari: 'Sabtu',
+        jp: [1],
+        kelas_ids: 'ALL',
+        keterangan: 'Pembiasaan Keagamaan Bersama'
+      }
+    ];
+  }
 
   AppState.timeConfig = {
     dailyConfig: {
@@ -5165,6 +5542,18 @@ function registerGlobalHandlers() {
   // Revisi Cetak & Orientasi & QR Code
   window.handleOrientationChange = handleOrientationChange;
   window.updatePrintDocumentQRCode = updatePrintDocumentQRCode;
+
+  // Revisi: Mapel Prioritas & Jadwal Kegiatan Khusus
+  window.openPriorityModal = openPriorityModal;
+  window.closePriorityModal = closePriorityModal;
+  window.savePrioritySubjectSubmit = savePrioritySubjectSubmit;
+  window.deletePrioritySubject = deletePrioritySubject;
+  window.renderKegiatanKhususTable = renderKegiatanKhususTable;
+  window.openKegiatanKhususModal = openKegiatanKhususModal;
+  window.closeKegiatanKhususModal = closeKegiatanKhususModal;
+  window.toggleAllKkClasses = toggleAllKkClasses;
+  window.saveKegiatanKhususSubmit = saveKegiatanKhususSubmit;
+  window.deleteKegiatanKhusus = deleteKegiatanKhusus;
 }
 
 registerGlobalHandlers();
