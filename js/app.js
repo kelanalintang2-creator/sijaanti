@@ -3633,6 +3633,10 @@ function generateScheduleReports(unplacedTasks = []) {
           const cfg = getDayConfigOrDefault(day);
           const maxJp = parseInt(cfg.jumlah_jp) || 8;
           for (let jp = 1; jp <= maxJp; jp++) {
+            // REVISI: Skip slot yang dikunci Kegiatan Khusus
+            const kkSlot = findKegiatanKhususForSlot(day, jp, kId);
+            if (kkSlot) continue;
+
             const classTaken = jadwal.some(j => j.kelas_id === kId && j.hari === day && parseInt(j.jp) === jp);
             const teacherTaken = jadwal.some(j => j.guru_id === gId && j.hari === day && parseInt(j.jp) === jp);
             const teacherBlocked = !!teacherBlockedMap[`${gId}_${day}_${jp}`];
@@ -3678,6 +3682,10 @@ function generateScheduleReports(unplacedTasks = []) {
       const cfg = getDayConfigOrDefault(day);
       const maxJp = parseInt(cfg.jumlah_jp) || 8;
       for (let jp = 1; jp <= maxJp; jp++) {
+        // REVISI: Skip slot yang dikunci Kegiatan Khusus
+        const kkSlot = findKegiatanKhususForSlot(day, jp, kId);
+        if (kkSlot) continue;
+
         const isFilled = jadwal.some(j => j.kelas_id === kId && j.hari === day && parseInt(j.jp) === jp);
         if (!isFilled) {
           emptySlotsForClass.push(`${day} JP ${jp}`);
@@ -3968,13 +3976,16 @@ function runAutoScheduleGenerator() {
           const nextM = existingTeacherMapels[jp + 1];
           return (prevM && prevM !== task.mapelId) || (nextM && nextM !== task.mapelId);
         });
-        if (hasAdjacentDiffMapel) {
-          continue; // Tolak opsi ini agar tidak berurutan 4 JP beda mapel
-        }
 
         // Hitung Skor Pedagogis:
         // 1. Kedekatan / Kumpul Jam Guru yang sama (minimalkan jam kosong/idle)
         let score = 100;
+
+        // REVISI: Jadikan penalty skor (bukan hard reject) agar guru tetap bisa terakomodir
+        if (hasAdjacentDiffMapel) {
+          score -= 50; // Penalti berat tapi tidak memblokir penempatan
+        }
+
         const existingTeacherJps = teacherSlotsByDay[teacherDayKey] || [];
 
         if (existingTeacherJps.length > 0) {
@@ -3987,7 +3998,7 @@ function runAutoScheduleGenerator() {
             score += 60; // Sangat disukai: jam guru berkumpul berurutan
           } else {
             const minGap = Math.min(...existingTeacherJps.map(ejp => Math.abs(ejp - firstBlockJp)));
-            score -= (minGap * 10); // Penalti untuk jam kosong di tengah
+            score -= (minGap * 5); // Penalti ringan untuk jam kosong di tengah
           }
         } else {
           score += 20; // Hari baru bagi guru
@@ -4057,6 +4068,7 @@ function runAutoScheduleGenerator() {
   });
 
   // PASS 3: Relaksasi Blok JP (Jika blok 2 JP tidak muat, pecah jadi 1 JP agar tetap tertampung)
+  const remainingAfterPass3 = [];
   remainingAfterPass2.forEach(task => {
     if (task.blockSize > 1) {
       let placedCount = 0;
@@ -4067,10 +4079,113 @@ function runAutoScheduleGenerator() {
         }
       }
       if (placedCount < task.blockSize) {
-        unplacedTasks.push({ ...task, blockSize: task.blockSize - placedCount });
+        remainingAfterPass3.push({ ...task, blockSize: task.blockSize - placedCount });
       }
     } else {
-      unplacedTasks.push(task);
+      if (!tryPlaceTask(task, true)) {
+        remainingAfterPass3.push(task);
+      }
+    }
+  });
+
+  // PASS 4: Fully Relaxed — Hapus semua penalty adjacency mapel berbeda
+  // Ini adalah upaya terakhir agar SEMUA guru bisa terakomodir
+  function tryPlaceTaskFullyRelaxed(task) {
+    let bestOption = null;
+    let highestScore = -9999;
+
+    for (const day of days) {
+      if (task.allowedDays && !task.allowedDays.includes(day)) continue;
+
+      const slots = validSlotsByDay[day] || [];
+      const classDayKey = `${day}_${task.kelasId}`;
+      const currentDayJp = classDayJpCount[classDayKey] || 0;
+      const dayCfg = getDayConfigOrDefault(day);
+      const maxJpForDay = parseInt(dayCfg.jumlah_jp) || 8;
+
+      if (currentDayJp + task.blockSize > maxJpForDay) continue;
+
+      for (let i = 0; i <= slots.length - task.blockSize; i++) {
+        const blockJps = slots.slice(i, i + task.blockSize);
+
+        if (task.allowedJps && !blockJps.every(jp => task.allowedJps.includes(jp))) continue;
+
+        let isConsecutive = true;
+        for (let c = 0; c < blockJps.length - 1; c++) {
+          if (blockJps[c + 1] !== blockJps[c] + 1) { isConsecutive = false; break; }
+        }
+        if (!isConsecutive) continue;
+
+        const isBlockValid = blockJps.every(jp => {
+          const blockKey = `${task.guruId}_${day}_${jp}`;
+          const tKey = `${day}_${jp}_${task.guruId}`;
+          const cKey = `${day}_${jp}_${task.kelasId}`;
+          return !teacherBlockedMap[blockKey] && !occupiedTeacher[tKey] && !occupiedClass[cKey];
+        });
+        if (!isBlockValid) continue;
+
+        // Skor minimal — tanpa penalty adjacency mapel berbeda
+        let score = 50;
+        const teacherDayKey = `${day}_${task.guruId}`;
+        const existingTeacherJps = teacherSlotsByDay[teacherDayKey] || [];
+        if (existingTeacherJps.length > 0) {
+          const firstBlockJp = blockJps[0];
+          const isAdj = existingTeacherJps.some(ejp => ejp === firstBlockJp - 1 || ejp === blockJps[blockJps.length - 1] + 1);
+          if (isAdj) score += 20;
+        } else {
+          score += 10;
+        }
+        score += (maxJpForDay - currentDayJp);
+
+        if (score > highestScore) {
+          highestScore = score;
+          bestOption = { day, blockJps };
+        }
+      }
+    }
+
+    if (bestOption) {
+      const { day, blockJps } = bestOption;
+      const classDayKey = `${day}_${task.kelasId}`;
+      const teacherDayKey = `${day}_${task.guruId}`;
+      blockJps.forEach(jp => {
+        occupiedTeacher[`${day}_${jp}_${task.guruId}`] = true;
+        occupiedClass[`${day}_${jp}_${task.kelasId}`] = true;
+        if (!teacherSlotsByDay[teacherDayKey]) teacherSlotsByDay[teacherDayKey] = [];
+        teacherSlotsByDay[teacherDayKey].push(jp);
+        if (!teacherMapelsByDay[teacherDayKey]) teacherMapelsByDay[teacherDayKey] = {};
+        teacherMapelsByDay[teacherDayKey][jp] = task.mapelId;
+        generatedSchedule.push({
+          id: `GEN_${task.kelasId}_${day}_${jp}`,
+          hari: day, jp: jp,
+          kelas_id: task.kelasId, guru_id: task.guruId,
+          mapel_id: task.mapelId, ruang_id: `R_${task.kelasId}`
+        });
+      });
+      classDayJpCount[classDayKey] = (classDayJpCount[classDayKey] || 0) + task.blockSize;
+      if (!groupPlacedDays[task.groupKey]) groupPlacedDays[task.groupKey] = new Set();
+      groupPlacedDays[task.groupKey].add(day);
+      return true;
+    }
+    return false;
+  }
+
+  remainingAfterPass3.forEach(task => {
+    if (task.blockSize > 1) {
+      if (!tryPlaceTaskFullyRelaxed(task)) {
+        let placedCount = 0;
+        for (let p = 0; p < task.blockSize; p++) {
+          const miniTask = { ...task, blockSize: 1, id: `${task.id}_p4sub_${p}` };
+          if (tryPlaceTaskFullyRelaxed(miniTask)) placedCount++;
+        }
+        if (placedCount < task.blockSize) {
+          unplacedTasks.push({ ...task, blockSize: task.blockSize - placedCount });
+        }
+      }
+    } else {
+      if (!tryPlaceTaskFullyRelaxed(task)) {
+        unplacedTasks.push(task);
+      }
     }
   });
 
