@@ -227,7 +227,7 @@
 
           <button type="button" onclick="navigateView('export')" id="nav-btn-export" class="nav-item w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-white/90 hover:bg-white/10 hover:text-white transition-all text-left cursor-pointer">
             <span class="material-symbols-outlined text-[19px]">print</span>
-            <span>Pratinjau & Ekspor SK</span>
+            <span>Pratinjau</span>
           </button>
 
           <div class="px-3 pt-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-blue-200/80">Pengaturan Sistem</div>
@@ -498,6 +498,10 @@
               </p>
             </div>
             <div class="flex items-center gap-2.5 flex-wrap">
+              <button type="button" onclick="openPriorityModal()" class="px-3.5 py-2 rounded-xl bg-purple-50 border border-purple-300 hover:bg-purple-100 text-purple-900 text-xs font-bold shadow-sm flex items-center gap-1.5 transition-all cursor-pointer">
+                <span class="material-symbols-outlined text-[16px] text-purple-600">stars</span>
+                <span>⭐ Mapel Prioritas (Slot Khusus)</span>
+              </button>
               <button type="button" onclick="openAddAssignmentModal()" class="px-3.5 py-2 rounded-xl bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-bold shadow-sm flex items-center gap-1.5 transition-all cursor-pointer">
                 <span class="material-symbols-outlined text-[16px] text-primary">add_circle</span>
                 <span>Tambah Beban Mengajar</span>
@@ -515,7 +519,7 @@
               <span class="text-xs text-blue-200 font-bold uppercase tracking-wider">Status Algoritma Constraint-Satisfaction</span>
               <h3 class="text-xl font-black" id="generator-status-headline">Siap Menghasilkan Jadwal Otomatis</h3>
               <p class="text-xs text-blue-100/90 leading-relaxed max-w-2xl" id="generator-status-sub">
-                Sistem akan memetakan seluruh kombinasi Guru &rarr; Mapel &rarr; Rombel &rarr; Ketersediaan Hari & JP tanpa bentrok ganda guru, ruang, atau rombel.
+                Sistem memetakan seluruh kombinasi Guru &rarr; Mapel &rarr; Rombel &rarr; Mapel Prioritas &rarr; Ketersediaan Hari & JP tanpa bentrok ganda.
               </p>
             </div>
             <div class="flex items-center gap-3">
@@ -527,6 +531,95 @@
                 <div class="text-2xl font-black text-emerald-300" id="stat-total-jp-demand">0 JP</div>
                 <div class="text-[10px] text-blue-200 font-bold">Beban JP/Minggu</div>
               </div>
+            </div>
+          </div>
+
+          <!-- REVISI 3 & 4: Catatan Rekap Guru Belum Terpenuhi & Laporan JP Kosong -->
+          <div id="gen-reports-summary-container" class="space-y-4" style="display: none;">
+            <!-- Card 1: Rekap Guru Belum Terpenuhi -->
+            <div class="bg-amber-50/90 border border-amber-300 rounded-2xl p-5 elevation-card">
+              <div class="flex items-center justify-between gap-2 mb-3">
+                <div class="flex items-center gap-2">
+                  <span class="material-symbols-outlined text-amber-700 text-[22px]">assignment_late</span>
+                  <h3 class="font-extrabold text-sm text-amber-950">Catatan Rekap Guru Belum Terpenuhi Jadwalnya</h3>
+                </div>
+                <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-200 text-amber-900" id="unmet-teachers-badge">0 Guru</span>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs bg-white rounded-xl border border-amber-200 overflow-hidden">
+                  <thead class="bg-amber-100/70 font-bold text-amber-900 border-b border-amber-200">
+                    <tr>
+                      <th class="p-2.5">Guru Pengampu</th>
+                      <th class="p-2.5">Mata Pelajaran</th>
+                      <th class="p-2.5">Kelas/Rombel</th>
+                      <th class="p-2.5 text-center">Kurang JP</th>
+                      <th class="p-2.5 text-amber-900">Saran Slot Available di Matrix</th>
+                    </tr>
+                  </thead>
+                  <tbody id="unmet-teachers-tbody" class="divide-y divide-amber-100">
+                    <!-- Populated dynamically -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Card 2: Laporan JP Kosong & Harusnya Diisi Apa -->
+            <div class="bg-rose-50/90 border border-rose-300 rounded-2xl p-5 elevation-card">
+              <div class="flex items-center justify-between gap-2 mb-3">
+                <div class="flex items-center gap-2">
+                  <span class="material-symbols-outlined text-rose-700 text-[22px]">event_busy</span>
+                  <h3 class="font-extrabold text-sm text-rose-950">Laporan JP Kosong Rombel & Rekomendasi Pengisian</h3>
+                </div>
+                <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-200 text-rose-900" id="empty-slots-badge">0 Slot Kosong</span>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs bg-white rounded-xl border border-rose-200 overflow-hidden">
+                  <thead class="bg-rose-100/70 font-bold text-rose-900 border-b border-rose-200">
+                    <tr>
+                      <th class="p-2.5">Kelas / Rombel</th>
+                      <th class="p-2.5">Slot JP yang Masih Kosong</th>
+                      <th class="p-2.5 text-rose-900">Harusnya Diisi Mapel & Guru Apa (Saran Solusi)</th>
+                    </tr>
+                  </thead>
+                  <tbody id="empty-slots-tbody" class="divide-y divide-rose-100">
+                    <!-- Populated dynamically -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- REVISI 2: Tabel Pengaturan Mapel Prioritas (Slot Khusus) -->
+          <div class="bg-surface-card rounded-2xl elevation-card border border-purple-200 overflow-hidden">
+            <div class="p-4 bg-purple-50/60 border-b border-purple-200 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-purple-700 text-[20px]">stars</span>
+                <div>
+                  <h3 class="font-bold text-sm text-purple-950">Aturan Mapel Prioritas & Slot Khusus</h3>
+                  <p class="text-[11px] text-purple-700">Mata pelajaran yang dibatasi/diprioritaskan pada hari, jam pelajaran, dan kelas tertentu saat auto-generate.</p>
+                </div>
+              </div>
+              <button type="button" onclick="openPriorityModal()" class="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center gap-1 shadow-sm cursor-pointer">
+                <span class="material-symbols-outlined text-[16px]">add</span>
+                <span>Tambah Aturan</span>
+              </button>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 text-text-secondary font-bold border-b border-border-subtle">
+                  <tr>
+                    <th class="p-3">Mata Pelajaran</th>
+                    <th class="p-3">Hari Khusus / Available</th>
+                    <th class="p-3">Rentang JP Available</th>
+                    <th class="p-3">Rombel Berlaku</th>
+                    <th class="p-3">Keterangan</th>
+                    <th class="p-3 text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody id="priority-subjects-tbody" class="divide-y divide-border-subtle">
+                  <!-- Populated dynamically -->
+                </tbody>
+              </table>
             </div>
           </div>
 
@@ -560,23 +653,20 @@
           </div>
         </section>
 
-        <!-- 2. VIEW: SCHEDULING MATRIX (ANTI-BENTROK) -->
+        <!-- 2. VIEW: SCHEDULING MATRIX (ANTI-BENTROK) - Sempurnakan Mode 1 Kelas Penuh & Mode Guru -->
         <section id="view-matrix" style="display: none;" class="space-y-4">
           <div class="bg-surface-card rounded-2xl p-4 elevation-card border border-border-subtle flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div class="flex items-center gap-3 flex-wrap">
               <div class="bg-slate-100 p-1 rounded-xl flex items-center text-xs font-bold">
-                <button type="button" onclick="setMatrixMode('class')" id="btn-mode-class" class="px-3 py-1.5 rounded-lg bg-white text-primary shadow-sm transition-all font-bold cursor-pointer">
-                  Mode Kelas (Per Hari)
-                </button>
-                <button type="button" onclick="setMatrixMode('single-class')" id="btn-mode-single" class="px-3 py-1.5 rounded-lg text-text-secondary hover:text-text-primary transition-all font-semibold cursor-pointer">
+                <button type="button" onclick="setMatrixMode('single-class')" id="btn-mode-single" class="px-3.5 py-1.5 rounded-lg bg-white text-primary shadow-sm transition-all font-bold cursor-pointer">
                   1 Kelas Penuh
                 </button>
-                <button type="button" onclick="setMatrixMode('teacher')" id="btn-mode-teacher" class="px-3 py-1.5 rounded-lg text-text-secondary hover:text-text-primary transition-all font-semibold cursor-pointer">
+                <button type="button" onclick="setMatrixMode('teacher')" id="btn-mode-teacher" class="px-3.5 py-1.5 rounded-lg text-text-secondary hover:text-text-primary transition-all font-semibold cursor-pointer">
                   Mode Guru
                 </button>
               </div>
 
-              <div id="class-select-wrap" style="display: none;">
+              <div id="class-select-wrap" style="display: block;">
                 <select id="matrix-class-select" onchange="AppState.selectedClassId = this.value; renderMatrixTable();" class="text-xs bg-slate-50 border border-border-subtle rounded-xl px-3 py-2 font-bold text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary cursor-pointer">
                   <!-- Dynamically populated -->
                 </select>
@@ -586,15 +676,6 @@
                 <select id="matrix-teacher-select" onchange="AppState.selectedTeacherId = this.value; renderMatrixTable();" class="text-xs bg-slate-50 border border-border-subtle rounded-xl px-3 py-2 font-bold text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary cursor-pointer">
                   <!-- Dynamically populated -->
                 </select>
-              </div>
-
-              <div id="filter-days-container" class="flex items-center gap-1.5">
-                <button type="button" onclick="setSelectedDay('Senin')" data-day="Senin" class="matrix-day-btn px-3 py-1.5 rounded-lg text-xs font-bold bg-primary text-white transition-colors cursor-pointer">Senin</button>
-                <button type="button" onclick="setSelectedDay('Selasa')" data-day="Selasa" class="matrix-day-btn px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-text-secondary hover:bg-slate-200 transition-colors cursor-pointer">Selasa</button>
-                <button type="button" onclick="setSelectedDay('Rabu')" data-day="Rabu" class="matrix-day-btn px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-text-secondary hover:bg-slate-200 transition-colors cursor-pointer">Rabu</button>
-                <button type="button" onclick="setSelectedDay('Kamis')" data-day="Kamis" class="matrix-day-btn px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-text-secondary hover:bg-slate-200 transition-colors cursor-pointer">Kamis</button>
-                <button type="button" onclick="setSelectedDay('Jumat')" data-day="Jumat" class="matrix-day-btn px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-text-secondary hover:bg-slate-200 transition-colors cursor-pointer">Jumat</button>
-                <button type="button" onclick="setSelectedDay('Sabtu')" data-day="Sabtu" class="matrix-day-btn px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-text-secondary hover:bg-slate-200 transition-colors cursor-pointer">Sabtu</button>
               </div>
             </div>
 
@@ -966,12 +1047,12 @@
           </div>
         </section>
 
-        <!-- 5. VIEW: PRATINJAU CETAK & EKSPOR SK KBM RESMI -->
+        <!-- 5. VIEW: PRATINJAU JADWAL PELAJARAN (DEFAULT KERTAS F4) -->
         <section id="view-export" style="display: none;" class="space-y-4">
           <div id="export-action-bar" class="bg-surface-card rounded-2xl p-4 elevation-card border border-border-subtle flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h2 class="font-bold text-sm text-text-primary">Format Dokumen Resmi KBM</h2>
-              <p class="text-xs text-text-secondary">Pratinjau SK Pembagian Tugas Mengajar & Jadwal Pelajaran siap cetak standar kedinasan.</p>
+              <h2 class="font-bold text-sm text-text-primary">Pratinjau Jadwal Pelajaran Resmi</h2>
+              <p class="text-xs text-text-secondary">Pratinjau SK Pembagian Tugas Mengajar & Jadwal Pelajaran siap cetak standar kedinasan (Default Kertas F4).</p>
             </div>
             <div class="flex items-center gap-2 flex-wrap">
               <div class="flex items-center gap-1.5 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
@@ -982,12 +1063,12 @@
                 </select>
               </div>
 
-              <!-- Filter Orientasi (Landscape vs Portrait) -->
+              <!-- Filter Orientasi (Default F4 Landscape & F4 Portrait) -->
               <div class="flex items-center gap-1.5 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
-                <span class="text-xs font-bold text-slate-700">Orientasi:</span>
+                <span class="text-xs font-bold text-slate-700">Kertas F4:</span>
                 <select id="export-orientation-select" onchange="handleOrientationChange()" class="text-xs bg-white border border-slate-300 rounded-lg px-2.5 py-1 font-bold text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer">
-                  <option value="landscape" selected>Landscape (Mendatar)</option>
-                  <option value="portrait">Portrait (Tegak)</option>
+                  <option value="landscape" selected>F4 Landscape (330×215 mm)</option>
+                  <option value="portrait">F4 Portrait (215×330 mm)</option>
                 </select>
               </div>
 
@@ -1026,24 +1107,20 @@
             </div>
           </div>
 
-          <!-- Printable Document Container (A4 Landscape) -->
+          <!-- Printable Document Container (Default F4 Landscape 8.5 x 13 in) -->
           <div id="printable-document" class="bg-white rounded-2xl p-8 elevation-card border border-border-subtle max-w-5xl mx-auto space-y-6 text-black">
-            <!-- Kop Surat Resmi Kedinasan (Dynamic from Config_Sekolah) -->
+            <!-- Kop Surat Resmi Kedinasan (Tanpa Bingkai Hitam Logo & Tanpa Barcode) -->
             <div class="border-b-4 border-double border-slate-900 pb-4 flex items-center gap-4 text-center">
-              <div id="print-logo-container" class="w-16 h-16 flex-shrink-0 flex items-center justify-center font-serif text-2xl font-black border-2 border-slate-900 rounded-lg overflow-hidden">
+              <div id="print-logo-container" class="w-16 h-16 flex-shrink-0 flex items-center justify-center overflow-hidden">
                 <img id="print-school-logo-img" src="" alt="Logo" style="display: none;" class="w-full h-full object-contain">
-                <span id="print-logo-fallback">SD</span>
+                <span id="print-logo-fallback" class="font-serif text-3xl font-black text-slate-800">SD</span>
               </div>
-              <div class="flex-1">
+              <div class="flex-1 pr-16">
                 <h3 class="text-xs font-bold tracking-wider uppercase">PEMERINTAH KABUPATEN MADIUN</h3>
                 <h2 class="text-sm font-extrabold uppercase">DINAS PENDIDIKAN DAN KEBUDAYAAN</h2>
                 <h1 class="text-lg font-black tracking-tight uppercase" id="print-school-name">SEKOLAH DASAR NEGERI PILANGREJO 1</h1>
                 <p class="text-[10px] text-slate-700 italic" id="print-school-alamat">Alamat: Jl. Raya Pilangrejo No. 12, Pilangkenceng, Kec. Pilangkenceng, Kab. Madiun 63154</p>
                 <p class="text-[9px] text-slate-600" id="print-school-meta">Email: sdn.pilangrejo1@madiunkab.go.id | NPSN: 20507812 | Akreditasi: A</p>
-              </div>
-              <div class="w-16 h-16 flex-shrink-0 flex flex-col items-center justify-center border border-slate-900 p-1 rounded bg-white overflow-hidden shadow-sm">
-                <img id="print-school-qrcode-img" src="" alt="QR Code Verifikasi" class="w-12 h-12 object-contain">
-                <span class="text-[7px] font-black text-slate-800 tracking-tighter mt-0.5">VERIFIED</span>
               </div>
             </div>
 
@@ -1141,6 +1218,71 @@
     </div>
   </div>
 
+  <!-- MODAL REVISI 2: ATURAN MAPEL PRIORITAS (SLOT KHUSUS) -->
+  <div id="modal-priority-crud" style="display: none;" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 items-center justify-center p-4">
+    <div class="bg-surface-card rounded-2xl elevation-modal max-w-lg w-full overflow-hidden border border-border-subtle">
+      <div class="bg-gradient-to-r from-purple-700 to-indigo-700 px-6 py-4 text-white flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="material-symbols-outlined text-[22px]">stars</span>
+          <h3 class="font-bold text-base" id="modal-priority-title">Atur Mapel Prioritas & Slot Khusus</h3>
+        </div>
+        <button type="button" onclick="closePriorityModal()" class="text-white/80 hover:text-white p-1 cursor-pointer">
+          <span class="material-symbols-outlined text-[20px]">close</span>
+        </button>
+      </div>
+
+      <div class="p-6 space-y-3.5 text-xs">
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">Mata Pelajaran yang Dibatasi/Diprioritaskan:</label>
+          <select id="prio-select-mapel" class="w-full border rounded-lg p-2.5 bg-slate-50 font-bold text-slate-900"></select>
+        </div>
+
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">Hari Available / Diizinkan (Centang Hari):</label>
+          <div class="grid grid-cols-3 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200" id="prio-hari-checkboxes">
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="Senin" class="prio-hari-chk" checked> <span>Senin</span></label>
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="Selasa" class="prio-hari-chk" checked> <span>Selasa</span></label>
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="Rabu" class="prio-hari-chk" checked> <span>Rabu</span></label>
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="Kamis" class="prio-hari-chk" checked> <span>Kamis</span></label>
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="Jumat" class="prio-hari-chk" checked> <span>Jumat</span></label>
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="Sabtu" class="prio-hari-chk" checked> <span>Sabtu</span></label>
+          </div>
+        </div>
+
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">Jam Pelajaran (JP) yang Diizinkan:</label>
+          <div class="grid grid-cols-4 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200" id="prio-jp-checkboxes">
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="1" class="prio-jp-chk" checked> <span>JP 1</span></label>
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="2" class="prio-jp-chk" checked> <span>JP 2</span></label>
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="3" class="prio-jp-chk" checked> <span>JP 3</span></label>
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="4" class="prio-jp-chk" checked> <span>JP 4</span></label>
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="5" class="prio-jp-chk"> <span>JP 5</span></label>
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="6" class="prio-jp-chk"> <span>JP 6</span></label>
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="7" class="prio-jp-chk"> <span>JP 7</span></label>
+            <label class="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer"><input type="checkbox" value="8" class="prio-jp-chk"> <span>JP 8</span></label>
+          </div>
+        </div>
+
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">Rombel / Kelas yang Berlaku Aturan Ini:</label>
+          <div class="grid grid-cols-3 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200 max-h-32 overflow-y-auto" id="prio-kelas-checkboxes">
+            <!-- Dynamically populated from master kelas -->
+          </div>
+        </div>
+
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">Keterangan / Alasan:</label>
+          <input type="text" id="prio-keterangan" placeholder="Contoh: Praktik PJOK di lapangan pagi hari" class="w-full border rounded-lg p-2.5 bg-slate-50 text-xs">
+        </div>
+
+        <div class="pt-4 border-t border-border-subtle flex items-center justify-end gap-2">
+          <button type="button" onclick="closePriorityModal()" class="px-3.5 py-2 rounded-lg text-xs font-semibold text-text-secondary hover:bg-slate-100 cursor-pointer">Batal</button>
+          <button type="button" onclick="savePrioritySubjectSubmit()" class="px-4 py-2 rounded-lg text-xs font-bold bg-purple-700 text-white hover:bg-purple-800 shadow-sm cursor-pointer">Simpan Aturan Prioritas</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- MODAL REVISI 5: HASIL GENERATOR JADWAL & REKOMENDASI BENTROK -->
   <div id="modal-generate-result" style="display: none;" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 items-center justify-center p-4">
     <div class="bg-surface-card rounded-2xl elevation-modal max-w-lg w-full overflow-hidden border border-border-subtle">
@@ -1167,12 +1309,24 @@
         </div>
 
         <!-- Rekomendasi Bentrok (jika ada yang gagal diplot) -->
-        <div id="gen-unplaced-container" style="display: none;" class="space-y-2">
-          <h4 class="font-bold text-rose-800 flex items-center gap-1.5">
-            <span class="material-symbols-outlined text-[18px]">warning</span>
-            <span>Rekomendasi Penyesuaian Bentrok:</span>
-          </h4>
-          <div class="max-h-48 overflow-y-auto space-y-2 pr-1" id="gen-unplaced-list"></div>
+        <div id="gen-unplaced-container" style="display: none;" class="space-y-3">
+          <!-- Sub-Card A: Rekap Guru Belum Terpenuhi & Saran Slot -->
+          <div class="p-3 bg-amber-50 rounded-xl border border-amber-200">
+            <h4 class="font-bold text-amber-900 flex items-center gap-1.5 mb-2">
+              <span class="material-symbols-outlined text-[16px] text-amber-600">assignment_late</span>
+              <span>Rekap Guru Belum Terpenuhi & Saran Slot Tersedia:</span>
+            </h4>
+            <div class="max-h-36 overflow-y-auto space-y-1.5 pr-1" id="gen-unplaced-list"></div>
+          </div>
+
+          <!-- Sub-Card B: Laporan JP Kosong & Harusnya Diisi Apa -->
+          <div class="p-3 bg-rose-50 rounded-xl border border-rose-200">
+            <h4 class="font-bold text-rose-900 flex items-center gap-1.5 mb-2">
+              <span class="material-symbols-outlined text-[16px] text-rose-600">event_busy</span>
+              <span>Laporan JP Kosong & Harusnya Diisi Mapel Apa:</span>
+            </h4>
+            <div class="max-h-36 overflow-y-auto space-y-1.5 pr-1" id="gen-modal-empty-slots-list"></div>
+          </div>
         </div>
 
         <div class="pt-4 border-t border-border-subtle flex items-center justify-end gap-2 flex-wrap">
@@ -1186,7 +1340,7 @@
           </button>
           <button type="button" onclick="closeGenerateResultModal(); navigateView('export');" class="px-4 py-2 rounded-lg text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm flex items-center gap-1 cursor-pointer">
             <span class="material-symbols-outlined text-[16px]">print</span>
-            <span>Lihat di Pratinjau SK</span>
+            <span>Lihat di Pratinjau</span>
           </button>
         </div>
       </div>
